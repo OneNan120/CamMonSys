@@ -1,4 +1,5 @@
 import { pool } from '../db.js';
+import { env } from '../config.js';
 
 type DeviceRow = {
   id: string;
@@ -41,13 +42,14 @@ export async function listDevices() {
        created_at,
        CASE
          WHEN publishing_session_id IS NOT NULL
-          AND last_seen_at > NOW() - INTERVAL '30 seconds'
+          AND last_seen_at > NOW() - ($1::integer * INTERVAL '1 second')
          THEN 'ONLINE'
          ELSE 'OFFLINE'
        END AS status
      FROM devices
      WHERE deleted_at IS NULL
      ORDER BY created_at DESC, id DESC`,
+    [env.CAMERA_PUBLISHING_LEASE_SECONDS],
   );
 
   return result.rows;
@@ -64,14 +66,14 @@ export async function getDeviceById(deviceId: string) {
        created_at,
        CASE
          WHEN publishing_session_id IS NOT NULL
-          AND last_seen_at > NOW() - INTERVAL '30 seconds'
+          AND last_seen_at > NOW() - ($2::integer * INTERVAL '1 second')
          THEN 'ONLINE'
          ELSE 'OFFLINE'
        END AS status
      FROM devices
      WHERE id = $1
        AND deleted_at IS NULL`,
-    [deviceId],
+    [deviceId, env.CAMERA_PUBLISHING_LEASE_SECONDS],
   );
 
   return result.rows[0] ?? null;

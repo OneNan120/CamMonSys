@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { env } from '../config.js';
 
-export const SESSION_DURATION_SECONDS = 8 * 60 * 60; // 8 hours
+export const SESSION_DURATION_SECONDS = env.AUTH_SESSION_DURATION_SECONDS;
 
 const claimsSchema = z.object({
   sub: z.string().uuid(),

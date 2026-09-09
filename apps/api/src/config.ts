@@ -8,7 +8,14 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(32),
-  TEST_DATABASE_URL: z.string().url().optional()
+  TEST_DATABASE_URL: z.string().url().optional(),
+  LIVEKIT_URL: z.string().url().startsWith('wss://'),
+  LIVEKIT_API_KEY: z.string().min(1),
+  LIVEKIT_API_SECRET: z.string().min(1),
+  AUTH_SESSION_DURATION_SECONDS: z.coerce.number().int().positive().default(28800),
+  CAMERA_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
+  CAMERA_PUBLISHING_LEASE_SECONDS: z.coerce.number().int().positive().default(30),
+  CAMERA_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -30,6 +37,15 @@ if (
   configValues.TEST_DATABASE_URL === configValues.DATABASE_URL
 ) {
   throw new Error('Tests must use a separate database.');
+}
+
+if (
+  parsed.data.CAMERA_PUBLISHING_LEASE_SECONDS <
+  parsed.data.CAMERA_HEARTBEAT_INTERVAL_SECONDS * 3
+) {
+  throw new Error(
+    'Camera publishing lease must allow at least three heartbeat intervals.',
+  );
 }
 
 export const env = {

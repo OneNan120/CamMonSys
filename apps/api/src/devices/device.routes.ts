@@ -3,12 +3,23 @@ import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
 import { createDevice, listDevices, getDeviceById } from './device.service.js';
+import { env } from '../config.js';
+import { createCameraToken } from '../video/livekit.service.js';
+import { reservePublishingSession, releasePublishingSession, renewPublishingSession } from './publishing.service.js';
 
 export const deviceRouter = Router();
 
 const createDeviceSchema = z.object({
   name: z.string().trim().min(1).max(100),
   location: z.string().trim().min(1).max(200),
+});
+
+const heartbeatSchema = z.object({
+  publishingSessionId: z.string().uuid(),
+});
+
+const stopSchema = z.object({
+  publishingSessionId: z.string().uuid(),
 });
 
 deviceRouter.post(
@@ -82,5 +93,162 @@ deviceRouter.get(
     }
 
     response.json({ device });
+  },
+);
+
+deviceRouter.post(
+  '/:deviceId/start',
+  requireAuth,
+  requireRole('ADMIN'),
+  async (request, response) => {
+    const parsed = deviceIdSchema.safeParse(request.params.deviceId);
+
+    if (!parsed.success) {
+      response.status(400).json({
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Provide a valid device ID.',
+        },
+      });
+      return;
+    }
+
+    const deviceId = parsed.data;
+    const ownerSessionId = response.locals.sessionId;
+
+    const device = await getDeviceById(deviceId);
+
+    if (!device) {
+      response.status(404).json({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Device not found.',
+        },
+      });
+      return;
+    }
+
+    const reservation = await reservePublishingSession(
+      deviceId,
+      ownerSessionId,
+    );
+
+    if (!reservation) {
+      response.status(409).json({
+        error: {
+          code: 'PUBLISHING_CONFLICT',
+          message: 'The device is unavailable or already reserved.',
+        },
+      });
+      return;
+    }
+
+    const publishingSessionId = reservation.publishing_session_id;
+
+    try {
+      const connection = await createCameraToken(
+        deviceId,
+        publishingSessionId,
+        `publisher-${publishingSessionId}`,
+        'publish',
+      );
+
+      response.set('Cache-Control', 'no-store');
+      response.json({
+        ...connection,
+        publishingSessionId,
+        heartbeatIntervalSeconds:
+          env.CAMERA_HEARTBEAT_INTERVAL_SECONDS,
+      });
+    } catch (error) {
+      await releasePublishingSession(
+        deviceId,
+        publishingSessionId,
+        ownerSessionId,
+      );
+
+      throw error;
+    }
+  },
+);
+
+deviceRouter.post(
+  '/:deviceId/heartbeat',
+  requireAuth,
+  requireRole('ADMIN'),
+  async (request, response) => {
+    const deviceId = deviceIdSchema.safeParse(request.params.deviceId);
+    const body = heartbeatSchema.safeParse(request.body);
+
+    if (!deviceId.success || !body.success) {
+      response.status(400).json({
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Provide valid device and publishing-session IDs.',
+        },
+      });
+      return;
+    }
+
+    const renewed = await renewPublishingSession(
+      deviceId.data,
+      body.data.publishingSessionId,
+      response.locals.sessionId,
+    );
+
+    if (!renewed) {
+      response.status(409).json({
+        error: {
+          code: 'PUBLISHING_SESSION_INACTIVE',
+          message: 'The camera session is no longer active. Start again.',
+        },
+      });
+      return;
+    }
+
+    response.json({
+      lastSeenAt: renewed.last_seen_at,
+      leaseExpiresAt: renewed.publishing_lease_expires_at,
+    });
+  },
+);
+
+deviceRouter.post(
+  '/:deviceId/stop',
+  requireAuth,
+  requireRole('ADMIN'),
+  async (request, response) => {
+    const deviceId = deviceIdSchema.safeParse(request.params.deviceId);
+    const body = stopSchema.safeParse(request.body);
+
+    if (!deviceId.success || !body.success) {
+      response.status(400).json({
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Provide valid device and publishing-session IDs.',
+        },
+      });
+      return;
+    }
+
+    const released = await releasePublishingSession(
+      deviceId.data,
+      body.data.publishingSessionId,
+      response.locals.sessionId,
+    );
+
+    if (!released) {
+      response.status(409).json({
+        error: {
+          code: 'PUBLISHING_SESSION_INACTIVE',
+          message: 'This camera session is no longer current.',
+        },
+      });
+      return;
+    }
+
+    response.status(202).json({
+      message: 'Camera reservation released; room cleanup queued.',
+    });
   },
 );
