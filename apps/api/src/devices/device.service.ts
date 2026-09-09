@@ -29,3 +29,26 @@ export async function createDevice(
 
   return device;
 } 
+
+export async function listDevices() {
+  const result = await pool.query(
+    `SELECT
+       id,
+       name,
+       location,
+       group_id,
+       last_seen_at,
+       created_at,
+       CASE
+         WHEN publishing_session_id IS NOT NULL
+          AND last_seen_at > NOW() - INTERVAL '30 seconds'
+         THEN 'ONLINE'
+         ELSE 'OFFLINE'
+       END AS status
+     FROM devices
+     WHERE deleted_at IS NULL
+     ORDER BY created_at DESC, id DESC`,
+  );
+
+  return result.rows;
+}

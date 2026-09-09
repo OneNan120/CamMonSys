@@ -4,6 +4,7 @@ import { LoginPage } from './auth/LoginPage';
 import { getCurrentUser, logout, type User, } from './auth/auth-api';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { RegisterDevicePage } from './devices/RegisterDevicePage';
+import { DeviceListPage } from './devices/DeviceListPage';
 import { RequireRole } from './auth/RequireRole';
 
 
@@ -108,8 +109,19 @@ export function App() {
 
         <Routes>
         <Route
-            path="/"
-            element={<h1>Welcome, {user.name}</h1>}
+          path="/"
+          element={
+            user.role === 'RESPONDER' ? (
+              <section>
+                <h1>My assignments</h1>
+                <p>The assignment view will be added later.</p>
+              </section>
+            ) : (
+              <RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}>
+                <DeviceListPage />
+              </RequireRole>
+            )
+          }
         />
 
         <Route

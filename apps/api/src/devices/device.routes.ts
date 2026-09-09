@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
-import { createDevice } from './device.service.js';
+import { createDevice, listDevices } from './device.service.js';
 
 export const deviceRouter = Router();
 
@@ -36,5 +36,16 @@ deviceRouter.post(
     );
 
     response.status(201).json({ device });
+  },
+);
+
+deviceRouter.get(
+  '/',
+  requireAuth,
+  requireRole('ADMIN', 'MONITOR'),
+  async (_request, response) => {
+    const devices = await listDevices();
+
+    response.json({ devices });
   },
 );
