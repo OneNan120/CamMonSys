@@ -1,0 +1,26 @@
+{
+  "name": "cammon-sys",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.12 <23"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"npm run dev -w @cammon/api\" \"npm run dev -w @cammon/web\"",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test -w @cammon/api",
+    "start": "npm run start -w @cammon/api",
+    "db:up": "docker compose up -d --wait db",
+    "db:down": "docker compose stop db",
+    "db:logs": "docker compose logs -f db"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "~5.9.3",
+    "@types/node": "^22.0.0"
+  }
+}
