@@ -3,6 +3,7 @@ import { ApiError } from './api';
 import { LoginPage } from './auth/LoginPage';
 import { getCurrentUser, logout, type User, } from './auth/auth-api';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
+import { RegisterDevicePage } from './devices/RegisterDevicePage';
 import { RequireRole } from './auth/RequireRole';
 
 
@@ -115,10 +116,7 @@ export function App() {
             path="/devices/new"
             element={
             <RequireRole user={user} allowedRoles={['ADMIN']}>
-                <section>
-                <h1>Register device</h1>
-                <p>The registration form will be added next.</p>
-                </section>
+              <RegisterDevicePage />
             </RequireRole>
             }
         />
