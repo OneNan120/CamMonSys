@@ -5,6 +5,7 @@ import { getCurrentUser, logout, type User, } from './auth/auth-api';
 import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { RegisterDevicePage } from './devices/RegisterDevicePage';
 import { DeviceListPage } from './devices/DeviceListPage';
+import { DeviceDetailPage } from './devices/DeviceDetailPage';
 import { RequireRole } from './auth/RequireRole';
 
 
@@ -141,6 +142,16 @@ export function App() {
                 <Link to="/">Return home</Link>
             </section>
             }
+        />
+        
+
+        <Route
+          path="/devices/:deviceId"
+          element={
+            <RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}>
+              <DeviceDetailPage />
+            </RequireRole>
+          }
         />
         </Routes>
     </main>

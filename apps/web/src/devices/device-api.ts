@@ -30,3 +30,8 @@ export function createDevice(name: string, location: string) {
   });
 }
 
+export function getDevice(deviceId: string) {
+  return apiRequest<{ device: DeviceSummary }>(
+    `/api/devices/${encodeURIComponent(deviceId)}`,
+  );
+}

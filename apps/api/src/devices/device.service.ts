@@ -52,3 +52,27 @@ export async function listDevices() {
 
   return result.rows;
 }
+
+export async function getDeviceById(deviceId: string) {
+  const result = await pool.query(
+    `SELECT
+       id,
+       name,
+       location,
+       group_id,
+       last_seen_at,
+       created_at,
+       CASE
+         WHEN publishing_session_id IS NOT NULL
+          AND last_seen_at > NOW() - INTERVAL '30 seconds'
+         THEN 'ONLINE'
+         ELSE 'OFFLINE'
+       END AS status
+     FROM devices
+     WHERE id = $1
+       AND deleted_at IS NULL`,
+    [deviceId],
+  );
+
+  return result.rows[0] ?? null;
+}

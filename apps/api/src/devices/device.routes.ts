@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
-import { createDevice, listDevices } from './device.service.js';
+import { createDevice, listDevices, getDeviceById } from './device.service.js';
 
 export const deviceRouter = Router();
 
@@ -47,5 +47,40 @@ deviceRouter.get(
     const devices = await listDevices();
 
     response.json({ devices });
+  },
+);
+
+const deviceIdSchema = z.string().uuid();
+
+deviceRouter.get(
+  '/:deviceId',
+  requireAuth,
+  requireRole('ADMIN', 'MONITOR'),
+  async (request, response) => {
+    const parsed = deviceIdSchema.safeParse(request.params.deviceId);
+
+    if (!parsed.success) {
+      response.status(400).json({
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Provide a valid device ID.',
+        },
+      });
+      return;
+    }
+
+    const device = await getDeviceById(parsed.data);
+
+    if (!device) {
+      response.status(404).json({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Device not found.',
+        },
+      });
+      return;
+    }
+
+    response.json({ device });
   },
 );

@@ -181,5 +181,76 @@ describe('device registration', () => {
     it('rejects unauthenticated device listing', async () => {
         await request(app).get('/api/devices').expect(401);
     });
+
+    it('allows a Monitor to retrieve an active device', async () => {
+        const deviceId = randomUUID();
+
+        await pool.query(
+            `INSERT INTO devices (id, name, location, created_by_id)
+     VALUES ($1, 'Detail camera', 'Room A', $2)`,
+            [deviceId, adminId],
+        );
+
+        const client = request.agent(app);
+
+        await client
+            .post('/api/auth/login')
+            .send({ email: monitorEmail, password })
+            .expect(200);
+
+        const response = await client
+            .get(`/api/devices/${deviceId}`)
+            .expect(200);
+
+        expect(response.body.device).toMatchObject({
+            id: deviceId,
+            name: 'Detail camera',
+            location: 'Room A',
+            status: 'OFFLINE',
+            last_seen_at: null,
+        });
+
+        expect(response.body.device).not.toHaveProperty(
+            'publishing_session_id',
+        );
+    });
+
+    it('returns 404 for missing and soft-deleted devices', async () => {
+        const deletedId = randomUUID();
+
+        await pool.query(
+            `INSERT INTO devices
+       (id, name, location, created_by_id, deleted_at)
+     VALUES ($1, 'Deleted camera', 'Room B', $2, NOW())`,
+            [deletedId, adminId],
+        );
+
+        const client = request.agent(app);
+
+        await client
+            .post('/api/auth/login')
+            .send({ email: monitorEmail, password })
+            .expect(200);
+
+        await client.get(`/api/devices/${randomUUID()}`).expect(404);
+        await client.get(`/api/devices/${deletedId}`).expect(404);
+    });
+
+    it('rejects malformed device IDs', async () => {
+        const client = request.agent(app);
+
+        await client
+            .post('/api/auth/login')
+            .send({ email: monitorEmail, password })
+            .expect(200);
+
+        await client.get('/api/devices/not-a-uuid').expect(400);
+    });
+
+    it('requires authentication to retrieve a device', async () => {
+        await request(app)
+            .get(`/api/devices/${randomUUID()}`)
+            .expect(401);
+    });
 });
 

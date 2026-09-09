@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { listDevices, type DeviceSummary } from './device-api';
 
 export function DeviceListPage() {
@@ -54,7 +55,9 @@ export function DeviceListPage() {
         <ul>
           {devices.map((device) => (
             <li key={device.id}>
-              <h2>{device.name}</h2>
+              <h2>
+                <Link to={`/devices/${device.id}`}>{device.name}</Link>
+            </h2>
               <p>{device.location}</p>
               <p>
                 Status: {device.status === 'ONLINE' ? 'Online' : 'Offline'}
