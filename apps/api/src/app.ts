@@ -1,11 +1,18 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { authRouter } from './auth/auth.routes.js';
+import cookieParser from 'cookie-parser';
 
 export function createApp(checkDatabase: () => Promise<void>, webRoot?: string) {
   const app = express();
   app.disable('x-powered-by');
+
   app.use(express.json({ limit: '100kb' }));
+  app.use(cookieParser());
+  app.use('/api/auth', authRouter);
+
+
   app.get('/api/health', async (_request, response) => {
     try {
       await checkDatabase();
