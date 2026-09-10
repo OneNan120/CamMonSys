@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { listDevices, type DeviceSummary } from './device-api';
-import { listEvents, type MonitoringEvent, updateEventStatus } from './event-api';
+import { listEvents, type MonitoringEvent, updateEventStatus, updateEventAssignment } from './event-api';
 import { listDeviceGroups, type DeviceGroup } from '../device-groups/device-group-api';
 import { ApiError } from '../api';
+import { listResponders, type ResponderSummary } from '../responders/responder-api';
 
 const UNGROUPED_FILTER = '__ungrouped__';
 
@@ -23,6 +24,13 @@ export function DeviceListPage() {
   const [groupsLoading, setGroupsLoading] = useState(true);
   const [groupsError, setGroupsError] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState('');
+  const [responders, setResponders] = useState<ResponderSummary[]>([]);
+  const [respondersError, setRespondersError] = useState('');
+  const [assignmentResponderIds, setAssignmentResponderIds] = useState<Record<string, string>>({});
+  const [assignmentInstructions, setAssignmentInstructions] = useState<Record<string, string>>({});
+
+  const [updatingAssignmentEventId, setUpdatingAssignmentEventId] =
+    useState<string | null>(null);
 
   const groupsRequestId = useRef(0);
 
@@ -73,6 +81,27 @@ export function DeviceListPage() {
       .finally(() => {
         if (active && requestId === groupsRequestId.current) {
           setGroupsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
+
+  useEffect(() => {
+    let active = true;
+
+    listResponders()
+      .then(({ responders }) => {
+        if (active) {
+          setResponders(responders);
+          setRespondersError('');
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setRespondersError('Unable to load responders.');
         }
       });
 
@@ -263,6 +292,68 @@ export function DeviceListPage() {
     };
   }, [loading, error]);
 
+  async function handleEventAssignment(event: MonitoringEvent) {
+    if (updatingAssignmentEventId) return;
+
+    const responderId =
+      assignmentResponderIds[event.id] ?? event.assigned_to_id ?? '';
+
+    const instructions =
+      assignmentInstructions[event.id] ?? event.instructions ?? '';
+
+    setUpdatingAssignmentEventId(event.id);
+    setEventActionError('');
+
+    try {
+      if (responderId) {
+        await updateEventAssignment(event.id, {
+          responderId,
+          instructions: instructions.trim(),
+        });
+      } else {
+        await updateEventAssignment(event.id, {
+          responderId: null,
+          instructions: null,
+        });
+      }
+
+      const result = await listEvents();
+      setEvents(result.events);
+      setEventsError('');
+
+      setAssignmentResponderIds((current) => {
+        const next = { ...current };
+        delete next[event.id];
+        return next;
+      });
+
+      setAssignmentInstructions((current) => {
+        const next = { ...current };
+        delete next[event.id];
+        return next;
+      });
+    } catch (error: unknown) {
+      setEventActionError(
+        error instanceof ApiError && error.status === 409
+          ? 'This event assignment has changed. Review the latest assignment.'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to update the assignment.',
+      );
+
+      try {
+        const result = await listEvents();
+        setEvents(result.events);
+      } catch {
+        setEventsError(
+          'Unable to refresh events. Displayed data may be outdated.',
+        );
+      }
+    } finally {
+      setUpdatingAssignmentEventId(null);
+    }
+  }
+
   async function handleEventStatus(
     eventId: string,
     status: 'ACKNOWLEDGED' | 'RESOLVED',
@@ -409,6 +500,7 @@ export function DeviceListPage() {
 
       {eventsError && <p role="alert">{eventsError}</p>}
       {eventActionError && <p role="alert">{eventActionError}</p>}
+      {respondersError && <p role="alert">{respondersError}</p>}
 
       {events.length === 0 ? (
         <p>No monitoring events yet.</p>
@@ -447,6 +539,100 @@ export function DeviceListPage() {
                 {' on '}
                 {new Date(event.resolved_at).toLocaleString()}
               </p>
+            )}
+
+            {event.assigned_to_id ? (
+              <>
+                <p>
+                  Assigned to:{' '}
+                  {event.assigned_to_name ??
+                    responders.find(
+                      (responder) => responder.id === event.assigned_to_id,
+                    )?.name ??
+                    'Unknown responder'}
+                </p>
+
+                {event.assigned_by_name && (
+                  <p>Assigned by: {event.assigned_by_name}</p>
+                )}
+
+                {event.instructions && (
+                  <p>Instructions: {event.instructions}</p>
+                )}
+              </>
+            ) : (
+              <p>Unassigned</p>
+            )}
+
+            {event.completion_note && (
+              <p>Completion note: {event.completion_note}</p>
+            )}
+
+            {event.status !== 'RESOLVED' && (
+              <fieldset disabled={updatingAssignmentEventId !== null}>
+                <legend>Responder assignment</legend>
+
+                <label>
+                  Responder
+                  <select
+                    value={
+                      assignmentResponderIds[event.id] ??
+                      event.assigned_to_id ??
+                      ''
+                    }
+                    onChange={(changeEvent) => {
+                      const responderId = changeEvent.target.value;
+
+                      setAssignmentResponderIds((current) => ({
+                        ...current,
+                        [event.id]: responderId,
+                      }));
+                    }}
+                  >
+                    <option value="">Unassigned</option>
+
+                    {responders.map((responder) => (
+                      <option key={responder.id} value={responder.id}>
+                        {responder.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Instructions
+                  <textarea
+                    value={
+                      assignmentInstructions[event.id] ??
+                      event.instructions ??
+                      ''
+                    }
+                    disabled={
+                      !(
+                        assignmentResponderIds[event.id] ??
+                        event.assigned_to_id
+                      )
+                    }
+                    onChange={(changeEvent) => {
+                      setAssignmentInstructions((current) => ({
+                        ...current,
+                        [event.id]: changeEvent.target.value,
+                      }));
+                    }}
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => void handleEventAssignment(event)}
+                >
+                  {updatingAssignmentEventId === event.id
+                    ? 'Saving assignment…'
+                    : event.assigned_to_id
+                      ? 'Update assignment'
+                      : 'Assign responder'}
+                </button>
+              </fieldset>
             )}
 
             {event.status !== 'RESOLVED' && (

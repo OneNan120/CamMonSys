@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { authRouter } from './auth/auth.routes.js';
 import { deviceRouter } from './devices/device.routes.js';
-import { monitoringRouter } from './monitoring/monitoring.routes.js';
+import { monitoringRouter } from './monitoring/monitoring-event.routes.js';
 import { eventRouter } from './monitoring/event.route.js';
 import { deviceGroupRouter } from './device-groups/device-group.routes.js';
 import { responderRouter } from './responders/responder.routes.js';

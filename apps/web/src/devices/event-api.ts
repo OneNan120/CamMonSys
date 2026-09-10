@@ -12,6 +12,11 @@ export type MonitoringEvent = {
     acknowledged_by_name: string | null;
     resolved_at: string | null;
     resolved_by_name: string | null;
+    assigned_to_id: string | null;
+    assigned_to_name: string | null;
+    assigned_by_name: string | null;
+    instructions: string | null;
+    completion_note: string | null;
 };
 
 export function listEvents(deviceId?: string) {
@@ -27,12 +32,49 @@ export function listEvents(deviceId?: string) {
 export async function updateEventStatus(
   eventId: string,
   status: 'ACKNOWLEDGED' | 'RESOLVED',
+  completionNote?: string,
 ): Promise<void> {
+  const trimmedNote = completionNote?.trim();
+
   await apiRequest(
     `/api/events/${encodeURIComponent(eventId)}/status`,
     {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({
+        status,
+        ...(status === 'RESOLVED' && trimmedNote
+          ? { completionNote: trimmedNote }
+          : {}),
+      }),
     },
+  );
+}
+
+export type EventAssignmentRequest =
+  | {
+      responderId: string;
+      instructions: string;
+    }
+  | {
+      responderId: null;
+      instructions?: null;
+    };
+
+export async function updateEventAssignment(
+  eventId: string,
+  assignment: EventAssignmentRequest,
+): Promise<void> {
+  await apiRequest(
+    `/api/events/${encodeURIComponent(eventId)}/assignment`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(assignment),
+    },
+  );
+}
+
+export function listMyAssignments() {
+  return apiRequest<{ events: MonitoringEvent[] }>(
+    '/api/events?assignedTo=me',
   );
 }

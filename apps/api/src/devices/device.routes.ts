@@ -9,6 +9,7 @@ import { createCameraToken } from '../video/livekit.service.js';
 import { reservePublishingSession, releasePublishingSession, renewPublishingSession, getActivePublishingSession } from './publishing.service.js';
 import { createMonitoringEvent } from '../monitoring/monitoring-event.service.js';
 import { notifyEventsChanged, notifyDevicesChanged } from '../monitoring/monitoring-events.js';
+import { responderHasActiveDeviceAssignment } from '../monitoring/monitoring-event.service.js';
 
 export const deviceRouter = Router();
 
@@ -141,10 +142,23 @@ deviceRouter.post(
 
 const deviceIdSchema = z.string().uuid();
 
+async function canViewDevice(
+  user: {
+    id: string;
+    role: 'ADMIN' | 'MONITOR' | 'RESPONDER';
+  },
+  deviceId: string,
+): Promise<boolean> {
+  if (user.role === 'ADMIN' || user.role === 'MONITOR') {
+    return true;
+  }
+
+  return responderHasActiveDeviceAssignment(user.id, deviceId);
+}
+
 deviceRouter.get(
   '/:deviceId',
   requireAuth,
-  requireRole('ADMIN', 'MONITOR'),
   async (request, response) => {
     const parsed = deviceIdSchema.safeParse(request.params.deviceId);
 
@@ -153,6 +167,18 @@ deviceRouter.get(
         error: {
           code: 'INVALID_INPUT',
           message: 'Provide a valid device ID.',
+        },
+      });
+      return;
+    }
+
+    const user = response.locals.user;
+
+    if (!(await canViewDevice(user, parsed.data))) {
+      response.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'You do not have an active assignment for this device.',
         },
       });
       return;
@@ -432,7 +458,6 @@ deviceRouter.post(
 deviceRouter.post(
   '/:deviceId/view-token',
   requireAuth,
-  requireRole('ADMIN', 'MONITOR'),
   async (request, response) => {
     const parsed = deviceIdSchema.safeParse(request.params.deviceId);
 
@@ -447,6 +472,18 @@ deviceRouter.post(
     }
 
     const deviceId = parsed.data;
+
+    const user = response.locals.user;
+
+    if (!(await canViewDevice(user, deviceId))) {
+      response.status(403).json({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'You do not have an active assignment for this device.',
+        },
+      });
+      return;
+    }
 
     if (!(await getDeviceById(deviceId))) {
       response.status(404).json({
@@ -470,10 +507,15 @@ deviceRouter.post(
       return;
     }
 
+    const participantIdentity =
+      user.role === 'RESPONDER'
+        ? `responder-${user.id}`
+        : `viewer-${randomUUID()}`;
+
     const connection = await createCameraToken(
       deviceId,
       session.publishing_session_id,
-      `viewer-${randomUUID()}`,
+      participantIdentity,
       'view',
     );
 

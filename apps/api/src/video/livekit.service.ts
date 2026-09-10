@@ -12,7 +12,7 @@ const roomService = new RoomServiceClient(
   env.LIVEKIT_API_SECRET,
 );
 
-function cameraRoomName(
+export function cameraRoomName(
   deviceId: string,
   publishingSessionId: string,
 ) {
@@ -63,6 +63,29 @@ export async function closeCameraRoom(
     await roomService.deleteRoom(room);
   } catch (error: unknown) {
     // A room that already disappeared needs no further deletion.
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'not_found'
+    ) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function disconnectResponderFromCamera(
+  deviceId: string,
+  publishingSessionId: string,
+  responderId: string,
+): Promise<void> {
+  const room = cameraRoomName(deviceId, publishingSessionId);
+  const identity = `responder-${responderId}`;
+
+  try {
+    await roomService.removeParticipant(room, identity);
+  } catch (error: unknown) {
     if (
       error instanceof Error &&
       'code' in error &&

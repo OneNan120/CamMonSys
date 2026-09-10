@@ -7,12 +7,10 @@ import { subscribeToDeviceChanges, subscribeToEventChanges } from './monitoring-
 
 export const monitoringRouter = Router();
 
-
-
 monitoringRouter.get(
   '/stream',
   requireAuth,
-  requireRole('ADMIN', 'MONITOR'),
+  requireRole('ADMIN', 'MONITOR', 'RESPONDER'),
   (_request, response) => {
     const sessionId = response.locals.sessionId;
     const userId = response.locals.user.id;
@@ -64,7 +62,7 @@ monitoringRouter.get(
              AND s.user_id = $2
              AND s.revoked_at IS NULL
              AND s.expires_at > NOW()
-             AND u.role IN ('ADMIN', 'MONITOR')`,
+             AND u.role IN ('ADMIN', 'MONITOR', 'RESPONDER')`,
           [sessionId, userId],
         );
 

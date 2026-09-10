@@ -9,6 +9,8 @@ import { DeviceDetailPage } from './devices/DeviceDetailPage';
 import { RequireRole } from './auth/RequireRole';
 import { CameraDevicePage } from './devices/CameraDevicePage';
 import { ManageDeviceGroupsPage } from './device-groups/ManageDeviceGroupsPage';
+import { ResponderAssignmentsPage } from './responders/ResponderAssignmentsPage';
+import { ResponderDevicePage } from './responders/ResponderDevicePage';
 
 export function App() {
 
@@ -118,8 +120,7 @@ export function App() {
             element={
               user.role === 'RESPONDER' ? (
                 <section>
-                  <h1>My assignments</h1>
-                  <p>The assignment view will be added later.</p>
+                  <ResponderAssignmentsPage />
                 </section>
               ) : (
                 <RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}>
@@ -161,12 +162,19 @@ export function App() {
           <Route
             path="/devices/:deviceId"
             element={
-              <RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}>
-                <DeviceDetailPage
-                  canPublish={user.role === 'ADMIN'}
-                  canDelete={user.role === 'ADMIN'}
-                  canManageGroups={user.role === 'ADMIN'}
-                />
+              <RequireRole
+                user={user}
+                allowedRoles={['ADMIN', 'MONITOR', 'RESPONDER']}
+              >
+                {user.role === 'RESPONDER' ? (
+                  <ResponderDevicePage />
+                ) : (
+                  <DeviceDetailPage
+                    canPublish={user.role === 'ADMIN'}
+                    canDelete={user.role === 'ADMIN'}
+                    canManageGroups={user.role === 'ADMIN'}
+                  />
+                )}
               </RequireRole>
             }
           />

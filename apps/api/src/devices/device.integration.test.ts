@@ -15,6 +15,10 @@ const adminEmail = `device-admin-${adminId}@example.com`;
 const monitorEmail = `device-monitor-${monitorId}@example.com`;
 const password = 'example-test-password';
 const deviceGroupPrefix = `device-assignment-test-${randomUUID()}`;
+const responderId = randomUUID();
+const secondResponderId = randomUUID();
+const responderEmail = `device-responder-${responderId}@example.com`;
+const secondResponderEmail = `device-responder-${secondResponderId}@example.com`;
 
 let testDatabaseVerified = false;
 
@@ -30,13 +34,25 @@ beforeAll(async () => {
     testDatabaseVerified = true;
     const hash = await hashPassword(password);
 
-    await pool.query(
-        `INSERT INTO users (id, name, email, password_hash, role)
-     VALUES
-       ($1, 'Test Admin', $2, $3, 'ADMIN'),
-       ($4, 'Test Monitor', $5, $3, 'MONITOR')`,
-        [adminId, adminEmail, hash, monitorId, monitorEmail],
-    );
+  await pool.query(
+    `INSERT INTO users (id, name, email, password_hash, role)
+    VALUES
+      ($1, 'Test Admin', $2, $3, 'ADMIN'),
+      ($4, 'Test Monitor', $5, $3, 'MONITOR'),
+      ($6, 'Test Responder', $7, $3, 'RESPONDER'),
+      ($8, 'Second Test Responder', $9, $3, 'RESPONDER')`,
+    [
+      adminId,
+      adminEmail,
+      hash,
+      monitorId,
+      monitorEmail,
+      responderId,
+      responderEmail,
+      secondResponderId,
+      secondResponderEmail,
+    ],
+  );
 });
 
 afterAll(async () => {
@@ -96,15 +112,17 @@ afterAll(async () => {
             );
 
             await pool.query(
-                'DELETE FROM auth_sessions WHERE user_id IN ($1, $2)',
-                [adminId, monitorId],
+              `DELETE FROM auth_sessions
+              WHERE user_id IN ($1, $2, $3, $4)`,
+              [adminId, monitorId, responderId, secondResponderId],
             );
 
             await pool.query(
-                'DELETE FROM users WHERE id IN ($1, $2)',
-                [adminId, monitorId],
+              `DELETE FROM users
+              WHERE id IN ($1, $2, $3, $4)`,
+              [adminId, monitorId, responderId, secondResponderId],
             );
-            }
+          }
     } finally {
         await pool.end();
     }
@@ -743,6 +761,547 @@ describe('device group assignment', () => {
     await request(app)
       .patch(`/api/devices/${deviceId}/group`)
       .send({ groupId: null })
+      .expect(401);
+  });
+});
+
+describe('Responder device access', () => {
+  it('allows a Responder to retrieve a device with an active assignment', async () => {
+    const assignedDeviceId = randomUUID();
+    const assignedEventId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (
+         id,
+         name,
+         location,
+         created_by_id
+       )
+       VALUES (
+         $1,
+         'Responder camera',
+         'Responder room',
+         $2
+       )`,
+      [assignedDeviceId, adminId],
+    );
+
+    await pool.query(
+      `INSERT INTO events (
+         id,
+         device_id,
+         type,
+         status,
+         assigned_to_id,
+         assigned_by_id,
+         instructions
+       )
+       VALUES (
+         $1,
+         $2,
+         'TEST_ALERT',
+         'OPEN',
+         $3,
+         $4,
+         'Check the room.'
+       )`,
+      [
+        assignedEventId,
+        assignedDeviceId,
+        responderId,
+        monitorId,
+      ],
+    );
+
+    const client = request.agent(app);
+
+    await client
+      .post('/api/auth/login')
+      .send({
+        email: responderEmail,
+        password,
+      })
+      .expect(200);
+
+    const response = await client
+      .get(`/api/devices/${assignedDeviceId}`)
+      .expect(200);
+
+    expect(response.body.device).toMatchObject({
+      id: assignedDeviceId,
+      name: 'Responder camera',
+      location: 'Responder room',
+    });
+  });
+
+  it('denies a Responder without an assignment for the device', async () => {
+    const unassignedDeviceId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (
+         id,
+         name,
+         location,
+         created_by_id
+       )
+       VALUES (
+         $1,
+         'Unassigned camera',
+         'Unassigned room',
+         $2
+       )`,
+      [unassignedDeviceId, adminId],
+    );
+
+    const client = request.agent(app);
+
+    await client
+      .post('/api/auth/login')
+      .send({
+        email: responderEmail,
+        password,
+      })
+      .expect(200);
+
+    const response = await client
+      .get(`/api/devices/${unassignedDeviceId}`)
+      .expect(403);
+
+    expect(response.body.error).toMatchObject({
+      code: 'FORBIDDEN',
+      message:
+        'You do not have an active assignment for this device.',
+    });
+  });
+
+  it('revokes device access after reassignment', async () => {
+    const assignedDeviceId = randomUUID();
+    const assignedEventId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (
+         id,
+         name,
+         location,
+         created_by_id
+       )
+       VALUES (
+         $1,
+         'Reassigned camera',
+         'Reassigned room',
+         $2
+       )`,
+      [assignedDeviceId, adminId],
+    );
+
+    await pool.query(
+      `INSERT INTO events (
+         id,
+         device_id,
+         type,
+         status,
+         assigned_to_id,
+         assigned_by_id,
+         instructions
+       )
+       VALUES (
+         $1,
+         $2,
+         'MOTION',
+         'OPEN',
+         $3,
+         $4,
+         'Initial assignment.'
+       )`,
+      [
+        assignedEventId,
+        assignedDeviceId,
+        responderId,
+        monitorId,
+      ],
+    );
+
+    const firstResponder = request.agent(app);
+    const secondResponder = request.agent(app);
+
+    await firstResponder
+      .post('/api/auth/login')
+      .send({
+        email: responderEmail,
+        password,
+      })
+      .expect(200);
+
+    await secondResponder
+      .post('/api/auth/login')
+      .send({
+        email: secondResponderEmail,
+        password,
+      })
+      .expect(200);
+
+    await firstResponder
+      .get(`/api/devices/${assignedDeviceId}`)
+      .expect(200);
+
+    await pool.query(
+      `UPDATE events
+       SET assigned_to_id = $2,
+           instructions = 'Reassigned.'
+       WHERE id = $1`,
+      [assignedEventId, secondResponderId],
+    );
+
+    await firstResponder
+      .get(`/api/devices/${assignedDeviceId}`)
+      .expect(403);
+
+    await secondResponder
+      .get(`/api/devices/${assignedDeviceId}`)
+      .expect(200);
+  });
+
+  it('revokes device access after the assignment is resolved', async () => {
+    const assignedDeviceId = randomUUID();
+    const assignedEventId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (
+         id,
+         name,
+         location,
+         created_by_id
+       )
+       VALUES (
+         $1,
+         'Resolved camera',
+         'Resolved room',
+         $2
+       )`,
+      [assignedDeviceId, adminId],
+    );
+
+    await pool.query(
+      `INSERT INTO events (
+         id,
+         device_id,
+         type,
+         status,
+         assigned_to_id,
+         assigned_by_id,
+         instructions
+       )
+       VALUES (
+         $1,
+         $2,
+         'BED_EXIT',
+         'ACKNOWLEDGED',
+         $3,
+         $4,
+         'Complete the check.'
+       )`,
+      [
+        assignedEventId,
+        assignedDeviceId,
+        responderId,
+        monitorId,
+      ],
+    );
+
+    const client = request.agent(app);
+
+    await client
+      .post('/api/auth/login')
+      .send({
+        email: responderEmail,
+        password,
+      })
+      .expect(200);
+
+    await client
+      .get(`/api/devices/${assignedDeviceId}`)
+      .expect(200);
+
+    await pool.query(
+      `UPDATE events
+       SET status = 'RESOLVED',
+           resolved_by_id = $2,
+           resolved_at = NOW()
+       WHERE id = $1`,
+      [assignedEventId, responderId],
+    );
+
+    await client
+      .get(`/api/devices/${assignedDeviceId}`)
+      .expect(403);
+  });
+
+  it('keeps access while another active assignment exists for the device', async () => {
+    const assignedDeviceId = randomUUID();
+    const resolvedEventId = randomUUID();
+    const activeEventId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (
+         id,
+         name,
+         location,
+         created_by_id
+       )
+       VALUES (
+         $1,
+         'Multiple assignment camera',
+         'Multiple assignment room',
+         $2
+       )`,
+      [assignedDeviceId, adminId],
+    );
+
+    await pool.query(
+      `INSERT INTO events (
+         id,
+         device_id,
+         type,
+         status,
+         assigned_to_id,
+         assigned_by_id,
+         instructions
+       )
+       VALUES
+         (
+           $1,
+           $3,
+           'TEST_ALERT',
+           'RESOLVED',
+           $4,
+           $5,
+           'Completed assignment.'
+         ),
+         (
+           $2,
+           $3,
+           'MOTION',
+           'OPEN',
+           $4,
+           $5,
+           'Still active.'
+         )`,
+      [
+        resolvedEventId,
+        activeEventId,
+        assignedDeviceId,
+        responderId,
+        monitorId,
+      ],
+    );
+
+    const client = request.agent(app);
+
+    await client
+      .post('/api/auth/login')
+      .send({
+        email: responderEmail,
+        password,
+      })
+      .expect(200);
+
+    await client
+      .get(`/api/devices/${assignedDeviceId}`)
+      .expect(200);
+  });
+
+  it('does not reveal whether an inaccessible device exists', async () => {
+    const inaccessibleDeviceId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (
+         id,
+         name,
+         location,
+         created_by_id
+       )
+       VALUES (
+         $1,
+         'Hidden camera',
+         'Hidden room',
+         $2
+       )`,
+      [inaccessibleDeviceId, adminId],
+    );
+
+    const client = request.agent(app);
+
+    await client
+      .post('/api/auth/login')
+      .send({
+        email: responderEmail,
+        password,
+      })
+      .expect(200);
+
+    await client
+      .get(`/api/devices/${inaccessibleDeviceId}`)
+      .expect(403);
+
+    await client
+      .get(`/api/devices/${randomUUID()}`)
+      .expect(403);
+  });
+
+  it('grants and revokes Responder view-token access with assignment changes', async () => {
+    const viewDeviceId = randomUUID();
+    const viewEventId = randomUUID();
+    const publishingSessionId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (
+        id,
+        name,
+        location,
+        created_by_id,
+        publishing_session_id,
+        publishing_lease_expires_at,
+        last_seen_at
+      )
+      VALUES (
+        $1,
+        'Responder streaming camera',
+        'Streaming room',
+        $2,
+        $3,
+        NOW() + INTERVAL '1 hour',
+        NOW()
+      )`,
+      [
+        viewDeviceId,
+        adminId,
+        publishingSessionId,
+      ],
+    );
+
+    await pool.query(
+      `INSERT INTO events (
+        id,
+        device_id,
+        type,
+        status,
+        assigned_to_id,
+        assigned_by_id,
+        instructions
+      )
+      VALUES (
+        $1,
+        $2,
+        'TEST_ALERT',
+        'OPEN',
+        $3,
+        $4,
+        'Watch the camera and check the room.'
+      )`,
+      [
+        viewEventId,
+        viewDeviceId,
+        responderId,
+        monitorId,
+      ],
+    );
+
+    const firstResponder = request.agent(app);
+    const secondResponder = request.agent(app);
+
+    await firstResponder
+      .post('/api/auth/login')
+      .send({
+        email: responderEmail,
+        password,
+      })
+      .expect(200);
+
+    await secondResponder
+      .post('/api/auth/login')
+      .send({
+        email: secondResponderEmail,
+        password,
+      })
+      .expect(200);
+
+    const initialToken = await firstResponder
+      .post(`/api/devices/${viewDeviceId}/view-token`)
+      .expect(200);
+
+    expect(initialToken.headers['cache-control']).toContain('no-store');
+
+    expect(initialToken.body).toMatchObject({
+      serverUrl: expect.any(String),
+      token: expect.any(String),
+    });
+
+    expect(initialToken.body.token.length).toBeGreaterThan(0);
+
+    const initiallyDenied = await secondResponder
+      .post(`/api/devices/${viewDeviceId}/view-token`)
+      .expect(403);
+
+    expect(initiallyDenied.body.error).toMatchObject({
+      code: 'FORBIDDEN',
+      message:
+        'You do not have an active assignment for this device.',
+    });
+
+    // Reassign the event to the second Responder.
+    await pool.query(
+      `UPDATE events
+      SET assigned_to_id = $2,
+          instructions = 'Take over this assignment.'
+      WHERE id = $1`,
+      [viewEventId, secondResponderId],
+    );
+
+    await firstResponder
+      .post(`/api/devices/${viewDeviceId}/view-token`)
+      .expect(403);
+
+    const reassignedToken = await secondResponder
+      .post(`/api/devices/${viewDeviceId}/view-token`)
+      .expect(200);
+
+    expect(reassignedToken.body).toMatchObject({
+      serverUrl: expect.any(String),
+      token: expect.any(String),
+    });
+
+    // Resolving the last active assignment removes access.
+    await pool.query(
+      `UPDATE events
+      SET status = 'RESOLVED',
+          resolved_by_id = $2,
+          resolved_at = NOW()
+      WHERE id = $1`,
+      [viewEventId, secondResponderId],
+    );
+
+    await secondResponder
+      .post(`/api/devices/${viewDeviceId}/view-token`)
+      .expect(403);
+  });
+
+  it('validates and authenticates Responder view-token requests', async () => {
+    const responder = request.agent(app);
+
+    await responder
+      .post('/api/auth/login')
+      .send({
+        email: responderEmail,
+        password,
+      })
+      .expect(200);
+
+    await responder
+      .post('/api/devices/not-a-uuid/view-token')
+      .expect(400);
+
+    await request(app)
+      .post(`/api/devices/${randomUUID()}/view-token`)
       .expect(401);
   });
 });
