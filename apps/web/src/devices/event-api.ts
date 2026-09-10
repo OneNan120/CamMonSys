@@ -23,3 +23,16 @@ export function listEvents(deviceId?: string) {
         `/api/events${query}`,
     );
 }
+
+export async function updateEventStatus(
+  eventId: string,
+  status: 'ACKNOWLEDGED' | 'RESOLVED',
+): Promise<void> {
+  await apiRequest(
+    `/api/events/${encodeURIComponent(eventId)}/status`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    },
+  );
+}

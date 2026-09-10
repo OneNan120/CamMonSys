@@ -65,3 +65,48 @@ export async function listMonitoringEvents(deviceId?: string) {
 
   return result.rows;
 }
+
+export async function updateMonitoringEventStatus(
+  eventId: string,
+  nextStatus: 'ACKNOWLEDGED' | 'RESOLVED',
+  actorId: string,
+) {
+  const expectedStatus =
+    nextStatus === 'ACKNOWLEDGED' ? 'OPEN' : 'ACKNOWLEDGED';
+
+  const result = await pool.query<MonitoringEventRow>(
+    `UPDATE events
+     SET status = $2::event_status,
+         acknowledged_by_id = CASE
+           WHEN $2::event_status = 'ACKNOWLEDGED' THEN $3::uuid
+           ELSE acknowledged_by_id
+         END,
+         acknowledged_at = CASE
+           WHEN $2::event_status = 'ACKNOWLEDGED' THEN NOW()
+           ELSE acknowledged_at
+         END,
+         resolved_by_id = CASE
+           WHEN $2::event_status = 'RESOLVED' THEN $3::uuid
+           ELSE resolved_by_id
+         END,
+         resolved_at = CASE
+           WHEN $2::event_status = 'RESOLVED' THEN NOW()
+           ELSE resolved_at
+         END
+     WHERE id = $1
+       AND status = $4::event_status
+     RETURNING id, device_id, type, status, created_at`,
+    [eventId, nextStatus, actorId, expectedStatus],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function monitoringEventExists(eventId: string) {
+  const result = await pool.query(
+    'SELECT id FROM events WHERE id = $1',
+    [eventId],
+  );
+
+  return result.rowCount === 1;
+}

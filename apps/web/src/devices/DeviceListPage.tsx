@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listDevices, type DeviceSummary } from './device-api';
-import { listEvents, type MonitoringEvent } from './event-api';
+import { listEvents, type MonitoringEvent, updateEventStatus } from './event-api';
+import { ApiError } from '../api';
 
 export function DeviceListPage() {
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
@@ -11,6 +12,8 @@ export function DeviceListPage() {
   const [refreshError, setRefreshError] = useState('');
   const [events, setEvents] = useState<MonitoringEvent[]>([]);
   const [eventsError, setEventsError] = useState('');
+  const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
+  const [eventActionError, setEventActionError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -151,6 +154,41 @@ export function DeviceListPage() {
     };
   }, [loading, error]);
 
+  async function handleEventStatus(
+    eventId: string,
+    status: 'ACKNOWLEDGED' | 'RESOLVED',
+  ) {
+    if (updatingEventId) return;
+
+    setUpdatingEventId(eventId);
+    setEventActionError('');
+
+    try {
+      await updateEventStatus(eventId, status);
+    } catch (error: unknown) {
+      setEventActionError(
+        error instanceof ApiError && error.status === 409
+          ? 'This event has changed. Review its latest status.'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to update the event.',
+      );
+    } finally {
+      // Fetch after success or conflict; do not depend solely on SSE.
+      try {
+        const result = await listEvents();
+        setEvents(result.events);
+        setEventsError('');
+      } catch {
+        setEventsError(
+          'Unable to refresh events. Displayed data may be outdated.',
+        );
+      }
+
+      setUpdatingEventId(null);
+    }
+  }
+
   return (
     <>
     <section>
@@ -194,12 +232,14 @@ export function DeviceListPage() {
       <h2 id="recent-events-heading">Recent events</h2>
 
       {eventsError && <p role="alert">{eventsError}</p>}
+      {eventActionError && <p role="alert">{eventActionError}</p>}
 
       {events.length === 0 ? (
         <p>No monitoring events yet.</p>
       ) : (
         <ul>
           {events.map((event) => (
+            
             <li key={event.id}>
               <p>
                 <strong>{event.type.replaceAll('_', ' ')}</strong>
@@ -216,6 +256,40 @@ export function DeviceListPage() {
               </p>
 
               <p>{new Date(event.created_at).toLocaleString()}</p>
+
+            {event.acknowledged_at && (
+              <p>
+                Acknowledged by {event.acknowledged_by_name ?? 'Unknown user'}
+                {' on '}
+                {new Date(event.acknowledged_at).toLocaleString()}
+              </p>
+            )}
+
+            {event.resolved_at && (
+              <p>
+                Resolved by {event.resolved_by_name ?? 'Unknown user'}
+                {' on '}
+                {new Date(event.resolved_at).toLocaleString()}
+              </p>
+            )}
+            
+            {event.status !== 'RESOLVED' && (
+              <button
+                disabled={updatingEventId !== null}
+                onClick={() =>
+                  void handleEventStatus(
+                    event.id,
+                    event.status === 'OPEN' ? 'ACKNOWLEDGED' : 'RESOLVED',
+                  )
+                }
+              >
+                {updatingEventId === event.id
+                  ? 'Updating…'
+                  : event.status === 'OPEN'
+                    ? 'Acknowledge'
+                    : 'Resolve'}
+              </button>
+            )}
             </li>
           ))}
         </ul>
