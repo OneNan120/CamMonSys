@@ -2,13 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { Room, RoomEvent, Track, type RemoteTrack, } from 'livekit-client';
 import { getViewingConnection } from './camera-api';
 
-export function CameraViewer({ deviceId }: { deviceId: string }) {
+export function CameraViewer({ deviceId, online, streamVersion }: { deviceId: string; online: boolean; streamVersion: string | null; }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState('Connecting…');
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    if (!online || !streamVersion) {
+      setStatus('Waiting for camera to come online…');
+      setError('');
+      return;
+    }
     const room = new Room();
     let cancelled = false;
     let attachedTrack: RemoteTrack | undefined;
@@ -109,7 +114,7 @@ export function CameraViewer({ deviceId }: { deviceId: string }) {
       detachVideo();
       void room.disconnect().catch(() => {});
     };
-  }, [deviceId, attempt]);
+  }, [deviceId, online, streamVersion, attempt]);
 
   return (
     <section aria-label="Camera feed">
@@ -128,7 +133,7 @@ export function CameraViewer({ deviceId }: { deviceId: string }) {
 
       {error && <p role="alert">{error}</p>}
 
-      <button onClick={() => setAttempt((value) => value + 1)}>
+      <button onClick={() => setAttempt((value) => value + 1)} disabled={!online}>
         Reconnect
       </button>
     </section>

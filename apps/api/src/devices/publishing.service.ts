@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { pool } from '../db.js';
 import { env } from '../config.js';
+import { notifyDevicesChanged } from '../monitoring/monitoring-events.js';
 
 export const PUBLISHING_LEASE_SECONDS = env.CAMERA_PUBLISHING_LEASE_SECONDS;
 
@@ -133,6 +134,7 @@ export async function releasePublishingSession(
     );
 
     await client.query('COMMIT');
+    notifyDevicesChanged();
     return true;
   } catch (error) {
     await client.query('ROLLBACK');
@@ -166,7 +168,13 @@ export async function renewPublishingSession(
     ],
   );
 
-  return result.rows[0] ?? null;
+  const renewed = result.rows[0] ?? null;
+
+  if (renewed) {
+    notifyDevicesChanged();
+  }
+
+  return renewed;
 }
 
 export async function expirePublishingSessions() {
@@ -211,7 +219,13 @@ export async function expirePublishingSessions() {
     }
 
     await client.query('COMMIT');
-    return expired.rowCount ?? 0;
+    const expiredCount = expired.rowCount ?? 0;
+
+    if (expiredCount > 0) {
+      notifyDevicesChanged();
+    }
+
+    return expiredCount;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

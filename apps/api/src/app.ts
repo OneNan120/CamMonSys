@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { authRouter } from './auth/auth.routes.js';
 import { deviceRouter } from './devices/device.routes.js';
+import { monitoringRouter } from './monitoring/monitoring.routes.js';
 import cookieParser from 'cookie-parser';
 
 export function createApp(checkDatabase: () => Promise<void>, webRoot?: string) {
@@ -13,6 +14,7 @@ export function createApp(checkDatabase: () => Promise<void>, webRoot?: string) 
   app.use(cookieParser());
   app.use('/api/auth', authRouter);
   app.use('/api/devices', deviceRouter);
+  app.use('/api', monitoringRouter);
 
 
   app.get('/api/health', async (_request, response) => {

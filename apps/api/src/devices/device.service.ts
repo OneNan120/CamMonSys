@@ -39,6 +39,7 @@ export async function listDevices() {
        location,
        group_id,
        last_seen_at,
+       publishing_session_id AS stream_version,
        created_at,
        CASE
          WHEN publishing_session_id IS NOT NULL
@@ -63,6 +64,7 @@ export async function getDeviceById(deviceId: string) {
        location,
        group_id,
        last_seen_at,
+       publishing_session_id AS stream_version,
        created_at,
        CASE
          WHEN publishing_session_id IS NOT NULL

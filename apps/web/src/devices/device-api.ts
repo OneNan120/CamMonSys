@@ -15,6 +15,7 @@ export type DeviceSummary = {
   location: string;
   group_id: string | null;
   last_seen_at: string | null;
+  stream_version: string | null;
   created_at: string;
   status: 'ONLINE' | 'OFFLINE';
 };

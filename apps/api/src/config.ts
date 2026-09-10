@@ -16,6 +16,7 @@ const schema = z.object({
   CAMERA_HEARTBEAT_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
   CAMERA_PUBLISHING_LEASE_SECONDS: z.coerce.number().int().positive().default(30),
   CAMERA_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
+  SSE_KEEPALIVE_INTERVAL_SECONDS: z.coerce.number().int().positive().default(15),
 });
 
 const parsed = schema.safeParse(process.env);
