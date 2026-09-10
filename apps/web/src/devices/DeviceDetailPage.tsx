@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { getDevice, type DeviceSummary } from './device-api';
 import { CameraViewer } from './CameraViewer';
 
+
 export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
   const { deviceId } = useParams<{ deviceId: string }>();
   const [device, setDevice] = useState<DeviceSummary | null>(null);

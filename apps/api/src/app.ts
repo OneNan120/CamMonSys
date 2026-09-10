@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { authRouter } from './auth/auth.routes.js';
 import { deviceRouter } from './devices/device.routes.js';
 import { monitoringRouter } from './monitoring/monitoring.routes.js';
+import { eventRouter } from './monitoring/event.route.js';
 import cookieParser from 'cookie-parser';
 
 export function createApp(checkDatabase: () => Promise<void>, webRoot?: string) {
@@ -15,7 +16,7 @@ export function createApp(checkDatabase: () => Promise<void>, webRoot?: string) 
   app.use('/api/auth', authRouter);
   app.use('/api/devices', deviceRouter);
   app.use('/api', monitoringRouter);
-
+  app.use('/api/events', eventRouter);
 
   app.get('/api/health', async (_request, response) => {
     try {

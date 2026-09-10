@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { RoomEvent, type Room } from 'livekit-client';
 import { ApiError } from '../api';
-import {
-  startCamera as reserveCamera,
-  stopCamera as releaseCamera,
-} from './camera-api';
-import {
-  createPublisherRoom,
-  publishCameraStream,
-} from './camera-publisher';
+import { createTestAlert, startCamera as reserveCamera, stopCamera as releaseCamera, } from './camera-api';
+import { createPublisherRoom, publishCameraStream, } from './camera-publisher';
 import { startHeartbeatLoop } from './camera-heartbeat';
 
 type CameraRun = {
@@ -26,6 +20,8 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
   const [status, setStatus] = useState('Stopped');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [sendingEvent, setSendingEvent] = useState(false);
+  const [eventMessage, setEventMessage] = useState('');
 
   async function releaseReservation(run: CameraRun) {
     if (!run.publishingSessionId) return;
@@ -202,6 +198,28 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
     }
   }
 
+  async function handleTestAlert() {
+    const run = runRef.current;
+
+    if (!run?.publishingSessionId || run.cancelled) return;
+
+    setSendingEvent(true);
+    setEventMessage('');
+
+    try {
+      await createTestAlert(deviceId, run.publishingSessionId);
+      setEventMessage('Test Alert created.');
+    } catch (error: unknown) {
+      setEventMessage(
+        error instanceof Error
+          ? error.message
+          : 'Unable to create Test Alert.',
+      );
+    } finally {
+      setSendingEvent(false);
+    }
+  }
+
   useEffect(() => {
     return () => {
       const run = runRef.current;
@@ -245,8 +263,15 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
         >
           Stop
         </button>
+        <button
+          onClick={() => void handleTestAlert()}
+          disabled={status !== 'Publishing' || sendingEvent}
+        >
+          {sendingEvent ? 'Sending alert…' : 'Test Alert'}
+        </button>
       </div>
-
+      
+      {eventMessage && <p role="status">{eventMessage}</p>}
       {error && <p role="alert">{error}</p>}
     </section>
   );

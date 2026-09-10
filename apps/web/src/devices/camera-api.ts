@@ -10,6 +10,14 @@ export type CameraStart = CameraConnection & {
   heartbeatIntervalSeconds: number;
 };
 
+export type MonitoringEvent = {
+  id: string;
+  device_id: string;
+  type: 'TEST_ALERT' | 'MOTION' | 'BED_EXIT';
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED';
+  created_at: string;
+};
+
 type HeartbeatResponse = {
   lastSeenAt: string;
   leaseExpiresAt: string;
@@ -56,5 +64,21 @@ export function getViewingConnection(deviceId: string) {
   return apiRequest<CameraConnection>(
     `${devicePath(deviceId)}/view-token`,
     { method: 'POST' },
+  );
+}
+
+export function createTestAlert(
+  deviceId: string,
+  publishingSessionId: string,
+) {
+  return apiRequest<{ event: MonitoringEvent }>(
+    `${devicePath(deviceId)}/events`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        publishingSessionId,
+        type: 'TEST_ALERT',
+      }),
+    },
   );
 }

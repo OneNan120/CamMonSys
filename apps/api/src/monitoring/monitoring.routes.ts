@@ -3,9 +3,11 @@ import { pool } from '../db.js';
 import { env } from '../config.js';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
-import { subscribeToDeviceChanges } from './monitoring-events.js';
+import { subscribeToDeviceChanges, subscribeToEventChanges } from './monitoring-events.js';
 
 export const monitoringRouter = Router();
+
+
 
 monitoringRouter.get(
   '/stream',
@@ -26,6 +28,7 @@ monitoringRouter.get(
     let closed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let unsubscribe = () => {};
+    let unsubscribeEvents = () => {};
 
     function cleanup() {
       if (closed) return;
@@ -33,6 +36,7 @@ monitoringRouter.get(
       closed = true;
       if (timer) clearTimeout(timer);
       unsubscribe();
+      unsubscribeEvents();
     }
 
     function closeConnection() {
@@ -94,8 +98,12 @@ monitoringRouter.get(
     unsubscribe = subscribeToDeviceChanges(() => {
       write('event: devices-changed\ndata: {}\n\n');
     });
+    unsubscribeEvents = subscribeToEventChanges(() => {
+      write('event: events-changed\ndata: {}\n\n');
+    });
 
     write('event: devices-changed\ndata: {}\n\n');
+    write('event: events-changed\ndata: {}\n\n');
 
     if (!closed) {
       timer = setTimeout(

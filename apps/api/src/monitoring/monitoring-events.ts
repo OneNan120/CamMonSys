@@ -15,3 +15,17 @@ export function subscribeToDeviceChanges(
     emitter.off('devices-changed', listener);
   };
 }
+
+export function notifyEventsChanged() {
+  emitter.emit('events-changed');
+}
+
+export function subscribeToEventChanges(
+  listener: () => void,
+): () => void {
+  emitter.on('events-changed', listener);
+
+  return () => {
+    emitter.off('events-changed', listener);
+  };
+}

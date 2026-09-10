@@ -7,6 +7,8 @@ import { createDevice, listDevices, getDeviceById } from './device.service.js';
 import { env } from '../config.js';
 import { createCameraToken } from '../video/livekit.service.js';
 import { reservePublishingSession, releasePublishingSession, renewPublishingSession, getActivePublishingSession } from './publishing.service.js';
+import { createMonitoringEvent } from '../monitoring/monitoring-event.service.js';
+import { notifyEventsChanged } from '../monitoring/monitoring-events.js';
 
 export const deviceRouter = Router();
 
@@ -21,6 +23,11 @@ const heartbeatSchema = z.object({
 
 const stopSchema = z.object({
   publishingSessionId: z.string().uuid(),
+});
+
+const createEventSchema = z.object({
+  publishingSessionId: z.string().uuid(),
+  type: z.enum(['TEST_ALERT', 'MOTION', 'BED_EXIT']),
 });
 
 deviceRouter.post(
@@ -59,6 +66,58 @@ deviceRouter.get(
     const devices = await listDevices();
 
     response.json({ devices });
+  },
+);
+
+deviceRouter.post(
+  '/:deviceId/events',
+  requireAuth,
+  requireRole('ADMIN'),
+  async (request, response) => {
+    const deviceId = deviceIdSchema.safeParse(request.params.deviceId);
+    const body = createEventSchema.safeParse(request.body);
+
+    if (!deviceId.success || !body.success) {
+      response.status(400).json({
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Provide valid device, session, and event details.',
+        },
+      });
+      return;
+    }
+
+    const device = await getDeviceById(deviceId.data);
+
+    if (!device) {
+      response.status(404).json({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Device not found.',
+        },
+      });
+      return;
+    }
+
+    const event = await createMonitoringEvent(
+      deviceId.data,
+      body.data.publishingSessionId,
+      response.locals.sessionId,
+      body.data.type,
+    );
+
+    if (!event) {
+      response.status(409).json({
+        error: {
+          code: 'PUBLISHING_SESSION_INACTIVE',
+          message: 'The camera session is no longer active.',
+        },
+      });
+      return;
+    }
+
+    notifyEventsChanged();
+    response.status(201).json({ event });
   },
 );
 
