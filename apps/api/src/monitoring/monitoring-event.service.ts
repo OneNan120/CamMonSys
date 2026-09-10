@@ -74,31 +74,54 @@ export async function updateMonitoringEventStatus(
   const expectedStatus =
     nextStatus === 'ACKNOWLEDGED' ? 'OPEN' : 'ACKNOWLEDGED';
 
-  const result = await pool.query<MonitoringEventRow>(
-    `UPDATE events
-     SET status = $2::event_status,
-         acknowledged_by_id = CASE
-           WHEN $2::event_status = 'ACKNOWLEDGED' THEN $3::uuid
-           ELSE acknowledged_by_id
-         END,
-         acknowledged_at = CASE
-           WHEN $2::event_status = 'ACKNOWLEDGED' THEN NOW()
-           ELSE acknowledged_at
-         END,
-         resolved_by_id = CASE
-           WHEN $2::event_status = 'RESOLVED' THEN $3::uuid
-           ELSE resolved_by_id
-         END,
-         resolved_at = CASE
-           WHEN $2::event_status = 'RESOLVED' THEN NOW()
-           ELSE resolved_at
-         END
-     WHERE id = $1
-       AND status = $4::event_status
-     RETURNING id, device_id, type, status, created_at`,
+    const result = await pool.query<MonitoringEventRow>(
+    `WITH updated_event AS (
+      UPDATE events
+      SET status = $2::event_status,
+          acknowledged_by_id = CASE
+            WHEN $2::event_status = 'ACKNOWLEDGED' THEN $3::uuid
+            ELSE acknowledged_by_id
+          END,
+          acknowledged_at = CASE
+            WHEN $2::event_status = 'ACKNOWLEDGED' THEN NOW()
+            ELSE acknowledged_at
+          END,
+          resolved_by_id = CASE
+            WHEN $2::event_status = 'RESOLVED' THEN $3::uuid
+            ELSE resolved_by_id
+          END,
+          resolved_at = CASE
+            WHEN $2::event_status = 'RESOLVED' THEN NOW()
+            ELSE resolved_at
+          END
+      WHERE id = $1
+        AND status = $4::event_status
+      RETURNING id, device_id, type, status, created_at
+    ),
+    audit_entry AS (
+      INSERT INTO audit_logs (
+        actor_id,
+        action,
+        target_type,
+        target_id
+      )
+      SELECT
+        $3::uuid,
+        CASE
+          WHEN $2::event_status = 'ACKNOWLEDGED'
+            THEN 'EVENT_ACKNOWLEDGED'
+          ELSE 'EVENT_RESOLVED'
+        END,
+        'EVENT',
+        id
+      FROM updated_event
+      RETURNING id
+    )
+    SELECT updated_event.*
+    FROM updated_event
+    JOIN audit_entry ON TRUE`,
     [eventId, nextStatus, actorId, expectedStatus],
   );
-
   return result.rows[0] ?? null;
 }
 

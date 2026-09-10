@@ -64,7 +64,16 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     if (verified) {
-      
+      await pool.query(
+        `DELETE FROM audit_logs
+        WHERE target_type = 'EVENT'
+          AND target_id IN (
+            SELECT id
+            FROM events
+            WHERE device_id = $1
+          )`,
+        [deviceId],
+      );
       await pool.query(
         'DELETE FROM events WHERE device_id = $1',
         [deviceId],
@@ -130,6 +139,33 @@ it('handles concurrent acknowledgements and preserves event history', async () =
   );
 
   expect(resolved?.status).toBe('RESOLVED');
+
+  const auditLogs = await pool.query(
+    `SELECT actor_id, action, target_type, target_id
+    FROM audit_logs
+    WHERE target_type = 'EVENT'
+      AND target_id = $1`,
+    [eventId],
+  );
+
+  expect(auditLogs.rows).toHaveLength(2);
+
+  expect(auditLogs.rows).toEqual(
+    expect.arrayContaining([
+      {
+        actor_id: savedAcknowledgement.acknowledged_by_id,
+        action: 'EVENT_ACKNOWLEDGED',
+        target_type: 'EVENT',
+        target_id: eventId,
+      },
+      {
+        actor_id: adminId,
+        action: 'EVENT_RESOLVED',
+        target_type: 'EVENT',
+        target_id: eventId,
+      },
+    ]),
+  );
 
   const saved = await pool.query(
     `SELECT status,
