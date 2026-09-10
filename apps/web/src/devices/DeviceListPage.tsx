@@ -14,6 +14,7 @@ export function DeviceListPage() {
   const [eventsError, setEventsError] = useState('');
   const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
   const [eventActionError, setEventActionError] = useState('');
+  const [deviceSearch, setDeviceSearch] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -189,11 +190,31 @@ export function DeviceListPage() {
     }
   }
 
+  const normalizedDeviceSearch = deviceSearch.trim().toLowerCase();
+
+  const filteredDevices = normalizedDeviceSearch
+    ? devices.filter(
+        (device) =>
+          device.name.toLowerCase().includes(normalizedDeviceSearch) ||
+          device.location.toLowerCase().includes(normalizedDeviceSearch),
+      )
+    : devices;
+
   return (
     <>
     <section>
       <h1>Devices</h1>
       {refreshError && <p role="alert">{refreshError}</p>}
+
+      <label>
+        Search devices
+        <input
+          type="search"
+          value={deviceSearch}
+          onChange={(event) => setDeviceSearch(event.target.value)}
+          placeholder="Search by name or location"
+        />
+      </label>
 
       {loading ? (
         <p role="status">Loading devices…</p>
@@ -204,11 +225,13 @@ export function DeviceListPage() {
             Retry
           </button>
         </div>
-      ) : devices.length === 0 ? (
-        <p>No devices have been registered yet.</p>
-      ) : (
-        <ul>
-          {devices.map((device) => (
+        ) : devices.length === 0 ? (
+          <p>No devices have been registered yet.</p>
+        ) : filteredDevices.length === 0 ? (
+          <p>No devices match your search.</p>
+        ) : (
+          <ul>
+            {filteredDevices.map((device) => (
             <li key={device.id}>
               <h2>
                 <Link to={`/devices/${device.id}`}>{device.name}</Link>
@@ -272,7 +295,7 @@ export function DeviceListPage() {
                 {new Date(event.resolved_at).toLocaleString()}
               </p>
             )}
-            
+
             {event.status !== 'RESOLVED' && (
               <button
                 disabled={updatingEventId !== null}
