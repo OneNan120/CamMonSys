@@ -2,7 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getDevice, type DeviceSummary } from './device-api';
 import { CameraViewer } from './CameraViewer';
-import { listEvents, type MonitoringEvent } from './event-api';
+import { listEvents, type MonitoringEvent, updateEventStatus } from './event-api';
+import { ApiError } from '../api';
 
 
 export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
@@ -17,6 +18,8 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
   const [eventsError, setEventsError] = useState('');
   const [eventsRefreshError, setEventsRefreshError] = useState('');
   const eventsRequestId = useRef(0);
+  const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
+  const [eventActionError, setEventActionError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -194,11 +197,46 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
       setEvents([]);
     });
 
-  return () => {
-    active = false;
-    source.close();
-  };
-}, [deviceId, loading, error]);
+    return () => {
+      active = false;
+      source.close();
+    };
+  }, [deviceId, loading, error]);
+
+  async function handleEventStatus(
+    eventId: string,
+    status: 'ACKNOWLEDGED' | 'RESOLVED',
+  ) {
+    if (!deviceId || updatingEventId) return;
+
+    setUpdatingEventId(eventId);
+    setEventActionError('');
+
+    try {
+      await updateEventStatus(eventId, status);
+    } catch (error: unknown) {
+      setEventActionError(
+        error instanceof ApiError && error.status === 409
+          ? 'This event has changed. Review its latest status.'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to update the event.',
+      );
+    } finally {
+      try {
+        const result = await listEvents(deviceId);
+        setEvents(result.events);
+        setEventsError('');
+        setEventsRefreshError('');
+      } catch {
+        setEventsRefreshError(
+          'Unable to refresh event history. Displayed data may be outdated.',
+        );
+      }
+
+      setUpdatingEventId(null);
+    }
+  }
 
   return (
     <section>
@@ -244,6 +282,7 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
           <section aria-labelledby="device-events-heading">
             <h2 id="device-events-heading">Event history</h2>
 
+            {eventActionError && <p role="alert">{eventActionError}</p>}
             {eventsRefreshError && <p role="alert">{eventsRefreshError}</p>}
 
             {eventsLoading ? (
@@ -279,6 +318,23 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
                         {' on '}
                         {new Date(event.resolved_at).toLocaleString()}
                       </p>
+                    )}
+                    {event.status !== 'RESOLVED' && (
+                      <button
+                        disabled={updatingEventId !== null}
+                        onClick={() =>
+                          void handleEventStatus(
+                            event.id,
+                            event.status === 'OPEN' ? 'ACKNOWLEDGED' : 'RESOLVED',
+                          )
+                        }
+                      >
+                        {updatingEventId === event.id
+                          ? 'Updating…'
+                          : event.status === 'OPEN'
+                            ? 'Acknowledge'
+                            : 'Resolve'}
+                      </button>
                     )}
                   </li>
                 ))}
