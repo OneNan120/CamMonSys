@@ -8,6 +8,7 @@ import { DeviceListPage } from './devices/DeviceListPage';
 import { DeviceDetailPage } from './devices/DeviceDetailPage';
 import { RequireRole } from './auth/RequireRole';
 import { CameraDevicePage } from './devices/CameraDevicePage';
+import { ManageDeviceGroupsPage } from './device-groups/ManageDeviceGroupsPage';
 
 export function App() {
 
@@ -97,7 +98,10 @@ export function App() {
             <Link to="/">Home</Link>{' '}
 
             {user.role === 'ADMIN' && (
-            <Link to="/devices/new">Register device</Link>
+              <>
+                <Link to="/devices/new">Register device</Link>{' '}
+                <Link to="/device-groups">Manage groups</Link>
+              </>
             )}
         </nav>
 
@@ -133,6 +137,15 @@ export function App() {
               </RequireRole>
               }
           />
+          
+          <Route
+            path="/device-groups"
+            element={
+              <RequireRole user={user} allowedRoles={['ADMIN']}>
+                <ManageDeviceGroupsPage />
+              </RequireRole>
+            }
+          />
 
           <Route
               path="*"
@@ -152,6 +165,7 @@ export function App() {
                 <DeviceDetailPage
                   canPublish={user.role === 'ADMIN'}
                   canDelete={user.role === 'ADMIN'}
+                  canManageGroups={user.role === 'ADMIN'}
                 />
               </RequireRole>
             }

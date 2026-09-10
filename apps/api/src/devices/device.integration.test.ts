@@ -14,6 +14,7 @@ const monitorId = randomUUID();
 const adminEmail = `device-admin-${adminId}@example.com`;
 const monitorEmail = `device-monitor-${monitorId}@example.com`;
 const password = 'example-test-password';
+const deviceGroupPrefix = `device-assignment-test-${randomUUID()}`;
 
 let testDatabaseVerified = false;
 
@@ -87,6 +88,11 @@ afterAll(async () => {
             await pool.query(
                 'DELETE FROM devices WHERE created_by_id IN ($1, $2)',
                 [adminId, monitorId],
+            );
+
+            await pool.query(
+                'DELETE FROM device_groups WHERE name LIKE $1',
+                [`${deviceGroupPrefix}-%`],
             );
 
             await pool.query(
@@ -297,6 +303,90 @@ describe('device registration', () => {
             .get(`/api/devices/${randomUUID()}`)
             .expect(401);
     });
+
+    it('creates a device in the selected group', async () => {
+        const groupId = randomUUID();
+
+        await pool.query(
+            `INSERT INTO device_groups (id, name)
+            VALUES ($1, $2)`,
+            [groupId, `${deviceGroupPrefix}-Registration`],
+        );
+
+        const client = request.agent(app);
+
+        await client
+            .post('/api/auth/login')
+            .send({ email: adminEmail, password })
+            .expect(200);
+
+        const response = await client
+            .post('/api/devices')
+            .send({
+            name: 'Grouped registration camera',
+            location: 'Grouped registration room',
+            groupId,
+            })
+            .expect(201);
+
+        expect(response.body.device).toMatchObject({
+            name: 'Grouped registration camera',
+            location: 'Grouped registration room',
+            created_by_id: adminId,
+            group_id: groupId,
+        });
+
+        const saved = await pool.query(
+            `SELECT group_id
+            FROM devices
+            WHERE id = $1`,
+            [response.body.device.id],
+        );
+
+        expect(saved.rows[0].group_id).toBe(groupId);
+    });
+
+    it('rejects a missing or malformed registration group', async () => {
+        const client = request.agent(app);
+        const missingGroupDeviceName =
+            `Missing group camera ${randomUUID()}`;
+
+        await client
+            .post('/api/auth/login')
+            .send({ email: adminEmail, password })
+            .expect(200);
+
+        const missingGroupResponse = await client
+            .post('/api/devices')
+            .send({
+            name: missingGroupDeviceName,
+            location: 'Missing group room',
+            groupId: randomUUID(),
+            })
+            .expect(404);
+
+        expect(missingGroupResponse.body.error.code).toBe(
+            'DEVICE_GROUP_NOT_FOUND',
+        );
+
+        const accidentallyCreated = await pool.query(
+            `SELECT id
+            FROM devices
+            WHERE name = $1`,
+            [missingGroupDeviceName],
+        );
+
+        expect(accidentallyCreated.rowCount).toBe(0);
+
+        await client
+            .post('/api/devices')
+            .send({
+            name: 'Malformed group camera',
+            location: 'Malformed group room',
+            groupId: 'not-a-uuid',
+            })
+            .expect(400);
+    });
 });
 
 describe('device deletion', () => {
@@ -483,3 +573,176 @@ describe('device deletion', () => {
   });
 });
 
+describe('device group assignment', () => {
+  it('lets an Admin assign and remove a device group', async () => {
+    const deviceId = randomUUID();
+    const groupId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO device_groups (id, name)
+       VALUES ($1, $2)`,
+      [groupId, `${deviceGroupPrefix}-Assignable`],
+    );
+
+    await pool.query(
+      `INSERT INTO devices (id, name, location, created_by_id)
+       VALUES ($1, 'Grouped camera', 'Grouped room', $2)`,
+      [deviceId, adminId],
+    );
+
+    const client = request.agent(app);
+
+    await client
+      .post('/api/auth/login')
+      .send({ email: adminEmail, password })
+      .expect(200);
+
+    const assigned = await client
+      .patch(`/api/devices/${deviceId}/group`)
+      .send({ groupId })
+      .expect(200);
+
+    expect(assigned.body.device).toEqual({
+      id: deviceId,
+      group_id: groupId,
+    });
+
+    const savedAssignment = await pool.query(
+      'SELECT group_id FROM devices WHERE id = $1',
+      [deviceId],
+    );
+
+    expect(savedAssignment.rows[0].group_id).toBe(groupId);
+
+    const removed = await client
+      .patch(`/api/devices/${deviceId}/group`)
+      .send({ groupId: null })
+      .expect(200);
+
+    expect(removed.body.device).toEqual({
+      id: deviceId,
+      group_id: null,
+    });
+
+    const savedRemoval = await pool.query(
+      'SELECT group_id FROM devices WHERE id = $1',
+      [deviceId],
+    );
+
+    expect(savedRemoval.rows[0].group_id).toBeNull();
+
+    const auditLogs = await pool.query(
+      `SELECT actor_id, action, target_type, target_id
+       FROM audit_logs
+       WHERE target_type = 'DEVICE'
+         AND target_id = $1`,
+      [deviceId],
+    );
+
+    expect(auditLogs.rows).toEqual(
+      expect.arrayContaining([
+        {
+          actor_id: adminId,
+          action: 'DEVICE_GROUP_ASSIGNED',
+          target_type: 'DEVICE',
+          target_id: deviceId,
+        },
+        {
+          actor_id: adminId,
+          action: 'DEVICE_GROUP_REMOVED',
+          target_type: 'DEVICE',
+          target_id: deviceId,
+        },
+      ]),
+    );
+
+    expect(auditLogs.rows).toHaveLength(2);
+  });
+
+  it('rejects a nonexistent group without changing the device', async () => {
+    const deviceId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (id, name, location, created_by_id)
+       VALUES ($1, 'Ungrouped camera', 'Ungrouped room', $2)`,
+      [deviceId, adminId],
+    );
+
+    const client = request.agent(app);
+
+    await client
+      .post('/api/auth/login')
+      .send({ email: adminEmail, password })
+      .expect(200);
+
+    const response = await client
+      .patch(`/api/devices/${deviceId}/group`)
+      .send({ groupId: randomUUID() })
+      .expect(404);
+
+    expect(response.body.error.code).toBe(
+      'DEVICE_GROUP_NOT_FOUND',
+    );
+
+    const saved = await pool.query(
+      'SELECT group_id FROM devices WHERE id = $1',
+      [deviceId],
+    );
+
+    expect(saved.rows[0].group_id).toBeNull();
+  });
+
+  it('validates input and enforces Admin permission', async () => {
+    const deviceId = randomUUID();
+
+    await pool.query(
+      `INSERT INTO devices (id, name, location, created_by_id)
+       VALUES ($1, 'Permission camera', 'Permission room', $2)`,
+      [deviceId, adminId],
+    );
+
+    const admin = request.agent(app);
+
+    await admin
+      .post('/api/auth/login')
+      .send({ email: adminEmail, password })
+      .expect(200);
+
+    await admin
+      .patch(`/api/devices/${deviceId}/group`)
+      .send({})
+      .expect(400);
+
+    await admin
+      .patch(`/api/devices/${deviceId}/group`)
+      .send({ groupId: 'not-a-uuid' })
+      .expect(400);
+
+    await admin
+      .patch('/api/devices/not-a-uuid/group')
+      .send({ groupId: null })
+      .expect(400);
+
+    await admin
+      .patch(`/api/devices/${randomUUID()}/group`)
+      .send({ groupId: null })
+      .expect(404);
+
+    const monitor = request.agent(app);
+
+    await monitor
+      .post('/api/auth/login')
+      .send({ email: monitorEmail, password })
+      .expect(200);
+
+    await monitor
+      .patch(`/api/devices/${deviceId}/group`)
+      .send({ groupId: null })
+      .expect(403);
+
+    await request(app)
+      .patch(`/api/devices/${deviceId}/group`)
+      .send({ groupId: null })
+      .expect(401);
+  });
+});

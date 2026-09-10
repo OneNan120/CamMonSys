@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
-import { createDevice, listDevices, getDeviceById, deleteDevice } from './device.service.js';
+import { createDevice, listDevices, getDeviceById, deleteDevice, assignDeviceGroup } from './device.service.js';
 import { env } from '../config.js';
 import { createCameraToken } from '../video/livekit.service.js';
 import { reservePublishingSession, releasePublishingSession, renewPublishingSession, getActivePublishingSession } from './publishing.service.js';
@@ -15,6 +15,7 @@ export const deviceRouter = Router();
 const createDeviceSchema = z.object({
   name: z.string().trim().min(1).max(100),
   location: z.string().trim().min(1).max(200),
+  groupId: z.string().uuid().nullable().optional(),
 });
 
 const heartbeatSchema = z.object({
@@ -28,6 +29,10 @@ const stopSchema = z.object({
 const createEventSchema = z.object({
   publishingSessionId: z.string().uuid(),
   type: z.enum(['TEST_ALERT', 'MOTION', 'BED_EXIT']),
+});
+
+const assignDeviceGroupSchema = z.object({
+  groupId: z.string().uuid().nullable(),
 });
 
 deviceRouter.post(
@@ -48,13 +53,26 @@ deviceRouter.post(
       return;
     }
 
-    const device = await createDevice(
+    const result = await createDevice(
       parsed.data.name,
       parsed.data.location,
       response.locals.user.id,
+      parsed.data.groupId ?? null,
     );
 
-    response.status(201).json({ device });
+    if (result.status === 'GROUP_NOT_FOUND') {
+      response.status(404).json({
+        error: {
+          code: 'DEVICE_GROUP_NOT_FOUND',
+          message: 'Device group not found.',
+        },
+      });
+      return;
+    }
+
+    notifyDevicesChanged();
+
+    response.status(201).json({ device: result.device });
   },
 );
 
@@ -153,6 +171,56 @@ deviceRouter.get(
     }
 
     response.json({ device });
+  },
+);
+
+deviceRouter.patch(
+  '/:deviceId/group',
+  requireAuth,
+  requireRole('ADMIN'),
+  async (request, response) => {
+    const deviceId = deviceIdSchema.safeParse(request.params.deviceId);
+    const body = assignDeviceGroupSchema.safeParse(request.body);
+
+    if (!deviceId.success || !body.success) {
+      response.status(400).json({
+        error: {
+          code: 'INVALID_INPUT',
+          message:
+            'Provide a valid device ID and a groupId UUID or null.',
+        },
+      });
+      return;
+    }
+
+    const result = await assignDeviceGroup(
+      deviceId.data,
+      body.data.groupId,
+      response.locals.user.id,
+    );
+
+    if (result.status === 'NOT_FOUND') {
+      response.status(404).json({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Device not found.',
+        },
+      });
+      return;
+    }
+
+    if (result.status === 'GROUP_NOT_FOUND') {
+      response.status(404).json({
+        error: {
+          code: 'DEVICE_GROUP_NOT_FOUND',
+          message: 'Device group not found.',
+        },
+      });
+      return;
+    }
+
+    notifyDevicesChanged();
+    response.json({ device: result.device });
   },
 );
 

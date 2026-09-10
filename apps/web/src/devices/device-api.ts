@@ -24,10 +24,14 @@ export function listDevices() {
   return apiRequest<{ devices: DeviceSummary[] }>('/api/devices');
 }
 
-export function createDevice(name: string, location: string) {
+export function createDevice(
+  name: string,
+  location: string,
+  groupId: string | null = null,
+) {
   return apiRequest<{ device: Device }>('/api/devices', {
     method: 'POST',
-    body: JSON.stringify({ name, location }),
+    body: JSON.stringify({ name, location, groupId }),
   });
 }
 
@@ -41,5 +45,23 @@ export function deleteDevice(deviceId: string) {
   return apiRequest<void>(
     `/api/devices/${encodeURIComponent(deviceId)}`,
     { method: 'DELETE' },
+  );
+}
+
+export function updateDeviceGroup(
+  deviceId: string,
+  groupId: string | null,
+) {
+  return apiRequest<{
+    device: {
+      id: string;
+      group_id: string | null;
+    };
+  }>(
+    `/api/devices/${encodeURIComponent(deviceId)}/group`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ groupId }),
+    },
   );
 }

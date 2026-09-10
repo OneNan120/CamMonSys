@@ -1,12 +1,21 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { getDevice, type DeviceSummary, deleteDevice } from './device-api';
+import { getDevice, type DeviceSummary, deleteDevice, updateDeviceGroup } from './device-api';
+import { listDeviceGroups, type DeviceGroup, } from '../device-groups/device-group-api';
 import { CameraViewer } from './CameraViewer';
 import { listEvents, type MonitoringEvent, updateEventStatus } from './event-api';
 import { ApiError } from '../api';
 
 
-export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolean; canDelete: boolean;}) {
+export function DeviceDetailPage({
+  canPublish,
+  canDelete,
+  canManageGroups,
+}: {
+  canPublish: boolean;
+  canDelete: boolean;
+  canManageGroups: boolean;
+}) {
   const navigate = useNavigate();
   const { deviceId } = useParams<{ deviceId: string }>();
   const [device, setDevice] = useState<DeviceSummary | null>(null);
@@ -19,10 +28,16 @@ export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolea
   const [eventsError, setEventsError] = useState('');
   const [eventsRefreshError, setEventsRefreshError] = useState('');
   const eventsRequestId = useRef(0);
+  const groupsRequestId = useRef(0);
   const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
   const [eventActionError, setEventActionError] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [groups, setGroups] = useState<DeviceGroup[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [groupsError, setGroupsError] = useState('');
+  const [updatingGroup, setUpdatingGroup] = useState(false);
+  const [groupActionError, setGroupActionError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -58,6 +73,45 @@ export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolea
       active = false;
     };
   }, [deviceId, attempt]);
+
+  useEffect(() => {
+    let active = true;
+
+    setGroupsLoading(true);
+    setGroupsError('');
+
+    const requestId = ++groupsRequestId.current;
+
+    listDeviceGroups()
+      .then(({ groups }) => {
+        if (
+          active &&
+          requestId === groupsRequestId.current
+        ) {
+          setGroups(groups);
+        }
+      })
+      .catch(() => {
+        if (
+          active &&
+          requestId === groupsRequestId.current
+        ) {
+          setGroupsError('Unable to load device groups.');
+        }
+      })
+      .finally(() => {
+        if (
+          active &&
+          requestId === groupsRequestId.current
+        ) {
+          setGroupsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
 
   useEffect(() => {
     let active = true;
@@ -104,6 +158,8 @@ export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolea
     let refreshAgain = false;
     let eventsRefreshing = false;
     let refreshEventsAgain = false;
+    let groupsRefreshing = false;
+    let refreshGroupsAgain = false;
 
     const source = new EventSource('/api/stream');
 
@@ -136,6 +192,44 @@ export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolea
         if (active && refreshAgain) {
           refreshAgain = false;
           void refreshDevice();
+        }
+      }
+    }
+
+    async function refreshGroups() {
+      if (!active) return;
+
+      if (groupsRefreshing) {
+        refreshGroupsAgain = true;
+        return;
+      }
+
+      groupsRefreshing = true;
+      const requestId = ++groupsRequestId.current;
+
+      try {
+        const result = await listDeviceGroups();
+
+        if (
+          active &&
+          requestId === groupsRequestId.current
+        ) {
+          setGroups(result.groups);
+          setGroupsLoading(false);
+          setGroupsError('');
+        }
+      } catch {
+        if (active) {
+          setGroupsError(
+            'Unable to refresh device groups. Displayed groups may be outdated.',
+          );
+        }
+      } finally {
+        groupsRefreshing = false;
+
+        if (active && refreshGroupsAgain) {
+          refreshGroupsAgain = false;
+          void refreshGroups();
         }
       }
     }
@@ -178,6 +272,7 @@ export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolea
 
     source.addEventListener('devices-changed', () => {
       void refreshDevice();
+      void refreshGroups();
     });
 
     source.addEventListener('events-changed', () => {
@@ -198,6 +293,7 @@ export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolea
       setRefreshError('Your monitoring access ended. Sign in again.');
       setDevice(null);
       setEvents([]);
+      setGroups([]);
     });
 
     return () => {
@@ -205,6 +301,34 @@ export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolea
       source.close();
     };
   }, [deviceId, loading, error]);
+
+  async function handleDeviceGroup(groupId: string | null) {
+    if (!device || updatingGroup) return;
+
+    setUpdatingGroup(true);
+    setGroupActionError('');
+
+    try {
+      const result = await updateDeviceGroup(device.id, groupId);
+
+      setDevice((currentDevice) =>
+        currentDevice
+          ? {
+              ...currentDevice,
+              group_id: result.device.group_id,
+            }
+          : currentDevice,
+      );
+    } catch (error: unknown) {
+      setGroupActionError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to update the device group.',
+      );
+    } finally {
+      setUpdatingGroup(false);
+    }
+  }
 
   async function handleDeleteDevice() {
     if (!device || deleting) return;
@@ -287,6 +411,51 @@ export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolea
         <>
           <h1>{device.name}</h1>
           <p>{device.location}</p>
+          {canManageGroups ? (
+            <div>
+              <label htmlFor="detail-device-group">Device group</label>
+
+              <select
+                id="detail-device-group"
+                value={device.group_id ?? ''}
+                disabled={
+                  groupsLoading ||
+                  Boolean(groupsError) ||
+                  updatingGroup
+                }
+                onChange={(event) =>
+                  void handleDeviceGroup(event.target.value || null)
+                }
+              >
+                <option value="">
+                  {groupsLoading ? 'Loading groups…' : 'No group'}
+                </option>
+
+                {device.group_id &&
+                  !groups.some((group) => group.id === device.group_id) && (
+                    <option value={device.group_id}>Unknown group</option>
+                  )}
+
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+
+              {updatingGroup && <p role="status">Updating group…</p>}
+              {groupsError && <p role="alert">{groupsError}</p>}
+              {groupActionError && <p role="alert">{groupActionError}</p>}
+            </div>
+          ) : (
+            <p>
+              Group:{' '}
+              {device.group_id
+                ? groups.find((group) => group.id === device.group_id)?.name ??
+                  'Unknown group'
+                : 'Ungrouped'}
+            </p>
+          )}
           <p>
             Status: {device.status === 'ONLINE' ? 'Online' : 'Offline'}
           </p>

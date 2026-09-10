@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { listDevices, type DeviceSummary } from './device-api';
 import { listEvents, type MonitoringEvent, updateEventStatus } from './event-api';
+import { listDeviceGroups, type DeviceGroup } from '../device-groups/device-group-api';
 import { ApiError } from '../api';
 
+const UNGROUPED_FILTER = '__ungrouped__';
+
 export function DeviceListPage() {
+
   const [devices, setDevices] = useState<DeviceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -15,6 +19,67 @@ export function DeviceListPage() {
   const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
   const [eventActionError, setEventActionError] = useState('');
   const [deviceSearch, setDeviceSearch] = useState('');
+  const [groups, setGroups] = useState<DeviceGroup[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [groupsError, setGroupsError] = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+
+  const groupsRequestId = useRef(0);
+
+  function applyGroups(nextGroups: DeviceGroup[]) {
+    setGroups(nextGroups);
+
+    setSelectedGroupId((currentGroupId) => {
+      if (
+        !currentGroupId ||
+        currentGroupId === UNGROUPED_FILTER
+      ) {
+        return currentGroupId;
+      }
+
+      const stillExists = nextGroups.some(
+        (group) => group.id === currentGroupId,
+      );
+
+      return stillExists ? currentGroupId : '';
+    });
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    setGroupsLoading(true);
+    setGroupsError('');
+
+    const requestId = ++groupsRequestId.current;
+    
+    listDeviceGroups()
+      .then(({ groups }) => {
+        if (
+          active &&
+          requestId === groupsRequestId.current
+        ) {
+          applyGroups(groups);
+        }
+      })
+      .catch(() => {
+        if (active && requestId === groupsRequestId.current) {
+          setGroupsError(
+            'Unable to load device groups. Showing all devices.',
+          );
+          setSelectedGroupId('');
+        }
+      })
+      .finally(() => {
+        if (active && requestId === groupsRequestId.current) {
+          setGroupsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
 
   useEffect(() => {
     let active = true;
@@ -71,6 +136,8 @@ export function DeviceListPage() {
     let active = true;
     let refreshing = false;
     let refreshAgain = false;
+    let groupsRefreshing = false;
+    let refreshGroupsAgain = false;
 
     const source = new EventSource('/api/stream');
 
@@ -107,6 +174,44 @@ export function DeviceListPage() {
       }
     }
 
+    async function refreshGroups() {
+      if (!active) return;
+
+      if (groupsRefreshing) {
+        refreshGroupsAgain = true;
+        return;
+      }
+
+      groupsRefreshing = true;
+      const requestId = ++groupsRequestId.current;
+
+      try {
+        const result = await listDeviceGroups();
+
+        if (
+          active &&
+          requestId === groupsRequestId.current
+        ) {
+          applyGroups(result.groups);
+          setGroupsLoading(false);
+          setGroupsError('');
+        }
+      } catch {
+        if (active) {
+          setGroupsError(
+            'Unable to refresh device groups. Displayed groups may be outdated.',
+          );
+        }
+      } finally {
+        groupsRefreshing = false;
+
+        if (active && refreshGroupsAgain) {
+          refreshGroupsAgain = false;
+          void refreshGroups();
+        }
+      }
+    }
+
     async function refreshEvents() {
       try {
         const result = await listEvents();
@@ -126,6 +231,7 @@ export function DeviceListPage() {
 
     source.addEventListener('devices-changed', () => {
       void refreshDevices();
+      void refreshGroups();
     });
 
 
@@ -147,6 +253,8 @@ export function DeviceListPage() {
       setRefreshError('Your monitoring access ended. Sign in again.');
       setDevices([]);
       setEvents([]);
+      setGroups([]);
+      setSelectedGroupId('');
     });
 
     return () => {
@@ -192,13 +300,29 @@ export function DeviceListPage() {
 
   const normalizedDeviceSearch = deviceSearch.trim().toLowerCase();
 
-  const filteredDevices = normalizedDeviceSearch
+  const searchFilteredDevices = normalizedDeviceSearch
     ? devices.filter(
         (device) =>
           device.name.toLowerCase().includes(normalizedDeviceSearch) ||
           device.location.toLowerCase().includes(normalizedDeviceSearch),
       )
     : devices;
+
+  const filteredDevices = searchFilteredDevices.filter((device) => {
+    if (!selectedGroupId) {
+      return true;
+    }
+
+    if (selectedGroupId === UNGROUPED_FILTER) {
+      return device.group_id === null;
+    }
+
+    return device.group_id === selectedGroupId;
+  });
+
+  const groupNameById = new Map(
+    groups.map((group) => [group.id, group.name]),
+  );
 
   return (
     <>
@@ -216,6 +340,29 @@ export function DeviceListPage() {
         />
       </label>
 
+      <label>
+        Device group
+        <select
+          value={selectedGroupId}
+          onChange={(event) => setSelectedGroupId(event.target.value)}
+          disabled={groupsLoading || Boolean(groupsError)}
+        >
+          <option value="">
+            {groupsLoading ? 'Loading groups…' : 'All devices'}
+          </option>
+
+          <option value={UNGROUPED_FILTER}>Ungrouped</option>
+
+          {groups.map((group) => (
+            <option key={group.id} value={group.id}>
+              {group.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {groupsError && <p role="alert">{groupsError}</p>}
+
       {loading ? (
         <p role="status">Loading devices…</p>
       ) : error ? (
@@ -228,7 +375,7 @@ export function DeviceListPage() {
         ) : devices.length === 0 ? (
           <p>No devices have been registered yet.</p>
         ) : filteredDevices.length === 0 ? (
-          <p>No devices match your search.</p>
+          <p>No devices match the current search and group filters.</p>
         ) : (
           <ul>
             {filteredDevices.map((device) => (
@@ -237,6 +384,12 @@ export function DeviceListPage() {
                 <Link to={`/devices/${device.id}`}>{device.name}</Link>
             </h2>
               <p>{device.location}</p>
+              <p>
+                Group:{' '}
+                {device.group_id
+                  ? groupNameById.get(device.group_id) ?? 'Unknown group'
+                  : 'Ungrouped'}
+              </p>
               <p>
                 Status: {device.status === 'ONLINE' ? 'Online' : 'Offline'}
               </p>
