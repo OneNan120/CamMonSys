@@ -3,12 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
-import { createDevice, listDevices, getDeviceById } from './device.service.js';
+import { createDevice, listDevices, getDeviceById, deleteDevice } from './device.service.js';
 import { env } from '../config.js';
 import { createCameraToken } from '../video/livekit.service.js';
 import { reservePublishingSession, releasePublishingSession, renewPublishingSession, getActivePublishingSession } from './publishing.service.js';
 import { createMonitoringEvent } from '../monitoring/monitoring-event.service.js';
-import { notifyEventsChanged } from '../monitoring/monitoring-events.js';
+import { notifyEventsChanged, notifyDevicesChanged } from '../monitoring/monitoring-events.js';
 
 export const deviceRouter = Router();
 
@@ -153,6 +153,54 @@ deviceRouter.get(
     }
 
     response.json({ device });
+  },
+);
+
+deviceRouter.delete(
+  '/:deviceId',
+  requireAuth,
+  requireRole('ADMIN'),
+  async (request, response) => {
+    const parsed = deviceIdSchema.safeParse(request.params.deviceId);
+
+    if (!parsed.success) {
+      response.status(400).json({
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Provide a valid device ID.',
+        },
+      });
+      return;
+    }
+
+    const result = await deleteDevice(
+      parsed.data,
+      response.locals.user.id,
+    );
+
+    if (result === 'NOT_FOUND') {
+      response.status(404).json({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Device not found.',
+        },
+      });
+      return;
+    }
+
+    if (result === 'HAS_UNRESOLVED_EVENTS') {
+      response.status(409).json({
+        error: {
+          code: 'DEVICE_HAS_UNRESOLVED_EVENTS',
+          message:
+            'Resolve all events for this device before deleting it.',
+        },
+      });
+      return;
+    }
+
+    notifyDevicesChanged();
+    response.status(204).send();
   },
 );
 

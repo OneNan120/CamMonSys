@@ -36,3 +36,10 @@ export function getDevice(deviceId: string) {
     `/api/devices/${encodeURIComponent(deviceId)}`,
   );
 }
+
+export function deleteDevice(deviceId: string) {
+  return apiRequest<void>(
+    `/api/devices/${encodeURIComponent(deviceId)}`,
+    { method: 'DELETE' },
+  );
+}

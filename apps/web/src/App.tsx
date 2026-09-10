@@ -149,7 +149,10 @@ export function App() {
             path="/devices/:deviceId"
             element={
               <RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}>
-                <DeviceDetailPage canPublish={user.role === 'ADMIN'} />
+                <DeviceDetailPage
+                  canPublish={user.role === 'ADMIN'}
+                  canDelete={user.role === 'ADMIN'}
+                />
               </RequireRole>
             }
           />

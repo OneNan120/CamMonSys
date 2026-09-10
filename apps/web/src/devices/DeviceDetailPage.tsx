@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { getDevice, type DeviceSummary } from './device-api';
+import { Link, useParams, useNavigate } from 'react-router-dom';
+import { getDevice, type DeviceSummary, deleteDevice } from './device-api';
 import { CameraViewer } from './CameraViewer';
 import { listEvents, type MonitoringEvent, updateEventStatus } from './event-api';
 import { ApiError } from '../api';
 
 
-export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
+export function DeviceDetailPage({ canPublish, canDelete }: { canPublish: boolean; canDelete: boolean;}) {
+  const navigate = useNavigate();
   const { deviceId } = useParams<{ deviceId: string }>();
   const [device, setDevice] = useState<DeviceSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20,6 +21,8 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
   const eventsRequestId = useRef(0);
   const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
   const [eventActionError, setEventActionError] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -203,6 +206,34 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
     };
   }, [deviceId, loading, error]);
 
+  async function handleDeleteDevice() {
+    if (!device || deleting) return;
+
+    const confirmed = window.confirm(
+      `Delete ${device.name}? Its history will be preserved.`,
+    );
+
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setDeleteError('');
+
+    try {
+      await deleteDevice(device.id);
+      navigate('/', { replace: true });
+    } catch (error: unknown) {
+      setDeleteError(
+        error instanceof ApiError && error.status === 409
+          ? 'Resolve all events for this device before deleting it.'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to delete the device.',
+      );
+
+      setDeleting(false);
+    }
+  }
+
   async function handleEventStatus(
     eventId: string,
     status: 'ACKNOWLEDGED' | 'RESOLVED',
@@ -271,6 +302,19 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
                 Open camera controls
               </Link>
             </p>
+          )}
+          {canDelete && (
+            <div>
+              {deleteError && <p role="alert">{deleteError}</p>}
+
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void handleDeleteDevice()}
+              >
+                {deleting ? 'Deleting…' : 'Delete device'}
+              </button>
+            </div>
           )}
           <CameraViewer 
             key={device.id} 
