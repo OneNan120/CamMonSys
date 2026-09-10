@@ -11,6 +11,7 @@ import { CameraDevicePage } from './devices/CameraDevicePage';
 import { ManageDeviceGroupsPage } from './device-groups/ManageDeviceGroupsPage';
 import { ResponderAssignmentsPage } from './responders/ResponderAssignmentsPage';
 import { ResponderDevicePage } from './responders/ResponderDevicePage';
+import { AuditLogPage } from './audit/AuditLogPage';
 
 export function App() {
 
@@ -102,7 +103,8 @@ export function App() {
             {user.role === 'ADMIN' && (
               <>
                 <Link to="/devices/new">Register device</Link>{' '}
-                <Link to="/device-groups">Manage groups</Link>
+                <Link to="/device-groups">Manage groups</Link>{' '}
+                <Link to="/audit-log">Audit log</Link>
               </>
             )}
         </nav>
@@ -144,6 +146,15 @@ export function App() {
             element={
               <RequireRole user={user} allowedRoles={['ADMIN']}>
                 <ManageDeviceGroupsPage />
+              </RequireRole>
+            }
+          />
+
+          <Route
+            path="/audit-log"
+            element={
+              <RequireRole user={user} allowedRoles={['ADMIN']}>
+                <AuditLogPage />
               </RequireRole>
             }
           />
