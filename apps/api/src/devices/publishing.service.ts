@@ -219,3 +219,21 @@ export async function expirePublishingSessions() {
     client.release();
   }
 }
+
+export async function getActivePublishingSession(deviceId: string) {
+  const result = await pool.query<{
+    publishing_session_id: string;
+  }>(
+    `SELECT publishing_session_id
+     FROM devices
+     WHERE id = $1
+       AND deleted_at IS NULL
+       AND publishing_session_id IS NOT NULL
+       AND publishing_lease_expires_at > clock_timestamp()
+       AND last_seen_at >
+         clock_timestamp() - ($2::integer * INTERVAL '1 second')`,
+    [deviceId, PUBLISHING_LEASE_SECONDS],
+  );
+
+  return result.rows[0] ?? null;
+}

@@ -7,7 +7,7 @@ import { RegisterDevicePage } from './devices/RegisterDevicePage';
 import { DeviceListPage } from './devices/DeviceListPage';
 import { DeviceDetailPage } from './devices/DeviceDetailPage';
 import { RequireRole } from './auth/RequireRole';
-
+import { CameraDevicePage } from './devices/CameraDevicePage';
 
 export function App() {
 
@@ -109,50 +109,59 @@ export function App() {
         </header>
 
         <Routes>
-        <Route
-          path="/"
-          element={
-            user.role === 'RESPONDER' ? (
-              <section>
-                <h1>My assignments</h1>
-                <p>The assignment view will be added later.</p>
-              </section>
-            ) : (
-              <RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}>
-                <DeviceListPage />
+          <Route
+            path="/"
+            element={
+              user.role === 'RESPONDER' ? (
+                <section>
+                  <h1>My assignments</h1>
+                  <p>The assignment view will be added later.</p>
+                </section>
+              ) : (
+                <RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}>
+                  <DeviceListPage />
+                </RequireRole>
+              )
+            }
+          />
+
+          <Route
+              path="/devices/new"
+              element={
+              <RequireRole user={user} allowedRoles={['ADMIN']}>
+                <RegisterDevicePage />
               </RequireRole>
-            )
-          }
-        />
+              }
+          />
 
-        <Route
-            path="/devices/new"
+          <Route
+              path="*"
+              element={
+              <section>
+                  <h1>Page not found</h1>
+                  <Link to="/">Return home</Link>
+              </section>
+              }
+          />
+          
+
+          <Route
+            path="/devices/:deviceId"
             element={
-            <RequireRole user={user} allowedRoles={['ADMIN']}>
-              <RegisterDevicePage />
-            </RequireRole>
+              <RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}>
+                <DeviceDetailPage />
+              </RequireRole>
             }
-        />
-
-        <Route
-            path="*"
+          />
+          
+          <Route
+            path="/devices/:deviceId/camera"
             element={
-            <section>
-                <h1>Page not found</h1>
-                <Link to="/">Return home</Link>
-            </section>
+              <RequireRole user={user} allowedRoles={['ADMIN']}>
+                <CameraDevicePage  />
+              </RequireRole>
             }
-        />
-        
-
-        <Route
-          path="/devices/:deviceId"
-          element={
-            <RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}>
-              <DeviceDetailPage />
-            </RequireRole>
-          }
-        />
+          />
         </Routes>
     </main>
     );

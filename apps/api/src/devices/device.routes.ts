@@ -1,11 +1,12 @@
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
 import { createDevice, listDevices, getDeviceById } from './device.service.js';
 import { env } from '../config.js';
 import { createCameraToken } from '../video/livekit.service.js';
-import { reservePublishingSession, releasePublishingSession, renewPublishingSession } from './publishing.service.js';
+import { reservePublishingSession, releasePublishingSession, renewPublishingSession, getActivePublishingSession } from './publishing.service.js';
 
 export const deviceRouter = Router();
 
@@ -250,5 +251,58 @@ deviceRouter.post(
     response.status(202).json({
       message: 'Camera reservation released; room cleanup queued.',
     });
+  },
+);
+
+deviceRouter.post(
+  '/:deviceId/view-token',
+  requireAuth,
+  requireRole('ADMIN', 'MONITOR'),
+  async (request, response) => {
+    const parsed = deviceIdSchema.safeParse(request.params.deviceId);
+
+    if (!parsed.success) {
+      response.status(400).json({
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Provide a valid device ID.',
+        },
+      });
+      return;
+    }
+
+    const deviceId = parsed.data;
+
+    if (!(await getDeviceById(deviceId))) {
+      response.status(404).json({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Device not found.',
+        },
+      });
+      return;
+    }
+
+    const session = await getActivePublishingSession(deviceId);
+
+    if (!session) {
+      response.status(409).json({
+        error: {
+          code: 'CAMERA_OFFLINE',
+          message: 'This camera is not currently reporting.',
+        },
+      });
+      return;
+    }
+
+    const connection = await createCameraToken(
+      deviceId,
+      session.publishing_session_id,
+      `viewer-${randomUUID()}`,
+      'view',
+    );
+
+    response.set('Cache-Control', 'no-store');
+    response.json(connection);
   },
 );

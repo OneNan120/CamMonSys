@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getDevice, type DeviceSummary } from './device-api';
-import { CameraViewer } from './CameraViewer';
+import { CameraPage } from './CameraPage';
 
-export function DeviceDetailPage() {
+export function CameraDevicePage() {
   const { deviceId } = useParams<{ deviceId: string }>();
   const [device, setDevice] = useState<DeviceSummary | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -45,35 +45,29 @@ export function DeviceDetailPage() {
     };
   }, [deviceId, attempt]);
 
+  if (loading) {
+    return <p role="status">Loading device…</p>;
+  }
+
+  if (error) {
+    return (
+      <section>
+        <p role="alert">{error}</p>
+        <button onClick={() => setAttempt((value) => value + 1)}>
+          Retry
+        </button>
+        <Link to="/">Back to devices</Link>
+      </section>
+    );
+  }
+
+  if (!device || device.id !== deviceId) return null;
+
   return (
     <section>
-      <Link to="/">Back to devices</Link>
-
-      {loading ? (
-        <p role="status">Loading device…</p>
-      ) : error ? (
-        <div>
-          <p role="alert">{error}</p>
-          <button onClick={() => setAttempt((value) => value + 1)}>
-            Retry
-          </button>
-        </div>
-      ) : device ? (
-        <>
-          <h1>{device.name}</h1>
-          <p>{device.location}</p>
-          <p>
-            Status: {device.status === 'ONLINE' ? 'Online' : 'Offline'}
-          </p>
-          <p>
-            Last seen:{' '}
-            {device.last_seen_at
-              ? new Date(device.last_seen_at).toLocaleString()
-              : 'Never'}
-          </p>
-          <CameraViewer key={device.id} deviceId={device.id} />
-        </>
-      ) : null}
+      <Link to={`/devices/${device.id}`}>Back to device</Link>
+      <p>{device.name} · {device.location}</p>
+      <CameraPage key={device.id} deviceId={device.id} />
     </section>
   );
 }
