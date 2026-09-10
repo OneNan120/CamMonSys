@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getDevice, type DeviceSummary } from './device-api';
 import { CameraViewer } from './CameraViewer';
+import { listEvents, type MonitoringEvent } from './event-api';
 
 
 export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
@@ -11,6 +12,11 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [refreshError, setRefreshError] = useState('');
+  const [events, setEvents] = useState<MonitoringEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState('');
+  const [eventsRefreshError, setEventsRefreshError] = useState('');
+  const eventsRequestId = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -48,11 +54,50 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
   }, [deviceId, attempt]);
 
   useEffect(() => {
+    let active = true;
+
+    setEventsLoading(true);
+    setEventsError('');
+    setEventsRefreshError('');
+
+    if (!deviceId) {
+      setEvents([]);
+      setEventsLoading(false);
+      return;
+    }
+
+    const requestId = ++eventsRequestId.current;
+
+    listEvents(deviceId)
+      .then(({ events }) => {
+        if (active && requestId === eventsRequestId.current) {
+          setEvents(events);
+        }
+      })
+      .catch(() => {
+        if (active && requestId === eventsRequestId.current) {
+          setEventsError('Unable to load this device’s event history.');
+        }
+      })
+      .finally(() => {
+        if (active && requestId === eventsRequestId.current) {
+          setEventsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [deviceId, attempt]);
+
+  useEffect(() => {
     if (!deviceId || loading || error) return;
 
     let active = true;
     let refreshing = false;
     let refreshAgain = false;
+    let eventsRefreshing = false;
+    let refreshEventsAgain = false;
 
     const source = new EventSource('/api/stream');
 
@@ -89,8 +134,48 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
       }
     }
 
+    async function refreshEvents() {
+      if (!active) return;
+
+      if (eventsRefreshing) {
+        refreshEventsAgain = true;
+        return;
+      }
+
+      eventsRefreshing = true;
+      const requestId = ++eventsRequestId.current;
+
+      try {
+        const result = await listEvents(deviceId);
+
+        if (active && requestId === eventsRequestId.current) {
+          setEvents(result.events);
+          setEventsLoading(false);
+          setEventsError('');
+          setEventsRefreshError('');
+        }
+      } catch {
+        if (active) {
+          setEventsRefreshError(
+            'Unable to refresh event history. Displayed data may be outdated.',
+          );
+        }
+      } finally {
+        eventsRefreshing = false;
+
+        if (active && refreshEventsAgain) {
+          refreshEventsAgain = false;
+          void refreshEvents();
+        }
+      }
+    }
+
     source.addEventListener('devices-changed', () => {
       void refreshDevice();
+    });
+
+    source.addEventListener('events-changed', () => {
+      void refreshEvents();
     });
 
     source.onerror = () => {
@@ -106,6 +191,7 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
       source.close();
       setRefreshError('Your monitoring access ended. Sign in again.');
       setDevice(null);
+      setEvents([]);
     });
 
   return () => {
@@ -154,6 +240,51 @@ export function DeviceDetailPage({ canPublish, }: { canPublish: boolean; }) {
             online={device.status === 'ONLINE'}
             streamVersion={device.stream_version}
           />
+
+          <section aria-labelledby="device-events-heading">
+            <h2 id="device-events-heading">Event history</h2>
+
+            {eventsRefreshError && <p role="alert">{eventsRefreshError}</p>}
+
+            {eventsLoading ? (
+              <p role="status">Loading event history…</p>
+            ) : eventsError ? (
+              <p role="alert">{eventsError}</p>
+            ) : events.length === 0 ? (
+              <p>No monitoring events for this device yet.</p>
+            ) : (
+              <ul>
+                {events.map((event) => (
+                  <li key={event.id}>
+                    <p>
+                      <strong>{event.type.replaceAll('_', ' ')}</strong>
+                      {' · '}
+                      {event.status}
+                    </p>
+
+                    <p>{new Date(event.created_at).toLocaleString()}</p>
+
+                    {event.acknowledged_at && (
+                      <p>
+                        Acknowledged by{' '}
+                        {event.acknowledged_by_name ?? 'Unknown user'}
+                        {' on '}
+                        {new Date(event.acknowledged_at).toLocaleString()}
+                      </p>
+                    )}
+
+                    {event.resolved_at && (
+                      <p>
+                        Resolved by {event.resolved_by_name ?? 'Unknown user'}
+                        {' on '}
+                        {new Date(event.resolved_at).toLocaleString()}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </>
       ) : null}
     </section>
