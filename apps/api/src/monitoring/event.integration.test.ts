@@ -230,6 +230,21 @@ it('handles concurrent acknowledgements and preserves event history', async () =
   ).toBeNull();
 });
 
+it('returns event detail to operators and only the assigned Responder', async () => {
+  const detailEventId = randomUUID();
+  await pool.query(`INSERT INTO events (id, device_id, type, assigned_to_id, assigned_by_id, instructions) VALUES ($1, $2, 'MOTION', $3, $4, 'Check the room.')`, [detailEventId, deviceId, responderId, adminId]);
+  for (const [email, expected] of [[`event-admin-${adminId}@example.com`, 200], [`event-monitor-${monitorId}@example.com`, 200], [`event-responder-${responderId}@example.com`, 200], [`event-responder-${secondResponderId}@example.com`, 404]] as const) {
+    const client = request.agent(app);
+    await client.post('/api/auth/login').send({ email, password }).expect(200);
+    const response = await client.get(`/api/events/${detailEventId}`).expect(expected);
+    if (expected === 200) expect(response.body.event).toMatchObject({ id: detailEventId, device_name: 'Event camera', instructions: 'Check the room.' });
+  }
+  await request(app).get(`/api/events/${detailEventId}`).expect(401);
+  const admin = request.agent(app); await admin.post('/api/auth/login').send({ email: `event-admin-${adminId}@example.com`, password }).expect(200);
+  await admin.get('/api/events/not-a-uuid').expect(400);
+  await admin.get(`/api/events/${randomUUID()}`).expect(404);
+});
+
 it('requires authentication for event APIs', async () => {
   await request(app)
     .get('/api/events')

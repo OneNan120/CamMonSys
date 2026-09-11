@@ -1,174 +1,202 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { deleteDeviceGroup, listDeviceGroups, type DeviceGroup, createDeviceGroup } from './device-group-api';
+
+import {
+  createDeviceGroup,
+  deleteDeviceGroup,
+  listDeviceGroups,
+  type DeviceGroup,
+} from './device-group-api';
 
 export function ManageDeviceGroupsPage() {
-    const [groups, setGroups] = useState<DeviceGroup[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [loadError, setLoadError] = useState('');
-    const [actionError, setActionError] = useState('');
-    const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
-    const [attempt, setAttempt] = useState(0);
-    const [newGroupName, setNewGroupName] = useState('');
-    const [creating, setCreating] = useState(false);
+  const [groups, setGroups] = useState<DeviceGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [creating, setCreating] = useState(false);
 
-    useEffect(() => {
-        let active = true;
+  useEffect(() => {
+    let active = true;
 
-        setLoading(true);
-        setLoadError('');
+    setLoading(true);
+    setLoadError('');
 
-        listDeviceGroups()
-            .then(({ groups }) => {
-                if (active) {
-                    setGroups(groups);
-                }
-            })
-            .catch(() => {
-                if (active) {
-                    setLoadError('Unable to load device groups.');
-                }
-            })
-            .finally(() => {
-                if (active) {
-                    setLoading(false);
-                }
-            });
+    listDeviceGroups()
+      .then(({ groups }) => active && setGroups(groups))
+      .catch(
+        () =>
+          active &&
+          setLoadError('Unable to load device groups.'),
+      )
+      .finally(() => active && setLoading(false));
 
-        return () => {
-            active = false;
-        };
-    }, [attempt]);
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
 
-    async function handleCreate(event: FormEvent<HTMLFormElement>) {
-        event.preventDefault();
+  const handleCreate = async (event: FormEvent) => {
+    event.preventDefault();
 
-        if (creating || deletingGroupId) return;
+    if (creating || deletingGroupId) return;
 
-        const normalizedName = newGroupName.trim();
+    const name = newGroupName.trim();
 
-        if (!normalizedName) {
-            setActionError('Provide a device-group name.');
-            return;
-        }
-
-        setCreating(true);
-        setActionError('');
-
-        try {
-            const { group } = await createDeviceGroup(normalizedName);
-
-            setGroups((currentGroups) =>
-            [...currentGroups, group].sort((left, right) =>
-                left.name.localeCompare(right.name),
-            ),
-            );
-
-            setNewGroupName('');
-        } catch (error: unknown) {
-            setActionError(
-            error instanceof Error
-                ? error.message
-                : 'Unable to create the device group.',
-            );
-        } finally {
-            setCreating(false);
-        }
+    if (!name) {
+      setActionError('Provide a device-group name.');
+      return;
     }
 
-    async function handleDelete(group: DeviceGroup) {
-        if (deletingGroupId) return;
+    setCreating(true);
+    setActionError('');
 
-        const confirmed = window.confirm(
-            `Delete ${group.name}? Devices in this group will become ungrouped.`,
-        );
+    try {
+      const { group } = await createDeviceGroup(name);
 
-        if (!confirmed) return;
+      setGroups((current) =>
+        [...current, group].sort((a, b) =>
+          a.name.localeCompare(b.name),
+        ),
+      );
 
-        setDeletingGroupId(group.id);
-        setActionError('');
+      setNewGroupName('');
+    } catch (e) {
+      setActionError(
+        e instanceof Error
+          ? e.message
+          : 'Unable to create the device group.',
+      );
+    } finally {
+      setCreating(false);
+    }
+  };
 
-        try {
-            await deleteDeviceGroup(group.id);
-
-            setGroups((currentGroups) =>
-                currentGroups.filter(
-                    (currentGroup) => currentGroup.id !== group.id,
-                ),
-            );
-        } catch (error: unknown) {
-            setActionError(
-                error instanceof Error
-                    ? error.message
-                    : 'Unable to delete the device group.',
-            );
-        } finally {
-            setDeletingGroupId(null);
-        }
+  const handleDelete = async (group: DeviceGroup) => {
+    if (
+      deletingGroupId ||
+      !window.confirm(
+        `Delete ${group.name}? Devices in this group will become ungrouped.`,
+      )
+    ) {
+      return;
     }
 
-    return (
-        <section>
-            <h1>Manage device groups</h1>
-            <form onSubmit={handleCreate}>
-                <fieldset
-                    disabled={
-                    loading ||
-                    Boolean(loadError) ||
-                    creating ||
-                    deletingGroupId !== null
-                    }
-                >
-                    <legend>Create device group</legend>
+    setDeletingGroupId(group.id);
+    setActionError('');
 
-                    <label htmlFor="device-group-name">Group name</label>
-                    <input
-                    id="device-group-name"
-                    value={newGroupName}
-                    onChange={(event) => setNewGroupName(event.target.value)}
-                    maxLength={100}
-                    required
-                    />
+    try {
+      await deleteDeviceGroup(group.id);
 
-                    <button type="submit">
-                    {creating ? 'Creating…' : 'Create group'}
-                    </button>
-                </fieldset>
-                </form>
-            {actionError && <p role="alert">{actionError}</p>}
+      setGroups((current) =>
+        current.filter((item) => item.id !== group.id),
+      );
+    } catch (e) {
+      setActionError(
+        e instanceof Error
+          ? e.message
+          : 'Unable to delete the device group.',
+      );
+    } finally {
+      setDeletingGroupId(null);
+    }
+  };
 
-            {loading ? (
-                <p role="status">Loading device groups…</p>
-            ) : loadError ? (
-                <div>
-                    <p role="alert">{loadError}</p>
-                    <button
-                        type="button"
-                        onClick={() => setAttempt((value) => value + 1)}
-                    >
-                        Retry
-                    </button>
-                </div>
-            ) : groups.length === 0 ? (
-                <p>No device groups have been created yet.</p>
-            ) : (
-                <ul>
-                    {groups.map((group) => (
-                        <li key={group.id}>
-                            <span>{group.name}</span>{' '}
+  return (
+    <section className="groups-page">
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">DEVICE ORGANIZATION</p>
+          <h2>Device groups</h2>
+          <p>Organize cameras for filtering.</p>
+        </div>
+      </div>
 
-                            <button
-                                type="button"
-                                disabled={creating || deletingGroupId !== null}
-                                onClick={() => void handleDelete(group)}
-                            >
-                                {deletingGroupId === group.id
-                                    ? 'Deleting…'
-                                    : 'Delete'}
-                            </button>
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </section>
-    );
+      <form
+        className="group-create-bar"
+        onSubmit={handleCreate}
+      >
+        <label
+          className="sr-only"
+          htmlFor="device-group-name"
+        >
+          New group name
+        </label>
+
+        <input
+          id="device-group-name"
+          value={newGroupName}
+          onChange={(event) =>
+            setNewGroupName(event.target.value)
+          }
+          maxLength={100}
+          required
+          placeholder="New group name"
+          disabled={
+            loading ||
+            Boolean(loadError) ||
+            creating ||
+            deletingGroupId !== null
+          }
+        />
+
+        <button
+          disabled={
+            loading ||
+            Boolean(loadError) ||
+            creating ||
+            deletingGroupId !== null
+          }
+        >
+          {creating ? 'Creating…' : 'Create group'}
+        </button>
+      </form>
+
+      {actionError && (
+        <p role="alert">{actionError}</p>
+      )}
+
+      {loading ? (
+        <p role="status">Loading device groups…</p>
+      ) : loadError ? (
+        <div className="empty-state">
+          <p role="alert">{loadError}</p>
+
+          <button
+            onClick={() => setAttempt((v) => v + 1)}
+          >
+            Retry
+          </button>
+        </div>
+      ) : groups.length === 0 ? (
+        <p className="empty-panel">
+          No device groups have been created.
+        </p>
+      ) : (
+        <ul className="group-list">
+          {groups.map((group) => (
+            <li key={group.id}>
+              <div>
+                <strong>{group.name}</strong>
+                <small>Device group</small>
+              </div>
+
+              <button
+                className="button-quiet"
+                disabled={
+                  creating || deletingGroupId !== null
+                }
+                onClick={() => void handleDelete(group)}
+              >
+                {deletingGroupId === group.id
+                  ? 'Deleting…'
+                  : 'Delete'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }

@@ -131,10 +131,33 @@ export async function listMonitoringEvents(deviceId?: string) {
   return result.rows;
 }
 
+export async function getMonitoringEvent(eventId: string, responderId?: string) {
+  const result = await pool.query(
+    `SELECT e.id, e.device_id, d.name AS device_name,
+      d.location AS device_location, e.type, e.status, e.created_at,
+      e.assigned_to_id, assigned_to.name AS assigned_to_name,
+      assigned_by.name AS assigned_by_name, e.instructions,
+      e.completion_note, e.acknowledged_at,
+      acknowledged_by.name AS acknowledged_by_name, e.resolved_at,
+      resolved_by.name AS resolved_by_name
+    FROM events AS e
+    JOIN devices AS d ON d.id = e.device_id
+    LEFT JOIN users AS assigned_to ON assigned_to.id = e.assigned_to_id
+    LEFT JOIN users AS assigned_by ON assigned_by.id = e.assigned_by_id
+    LEFT JOIN users AS acknowledged_by ON acknowledged_by.id = e.acknowledged_by_id
+    LEFT JOIN users AS resolved_by ON resolved_by.id = e.resolved_by_id
+    WHERE e.id = $1
+      AND ($2::uuid IS NULL OR (e.assigned_to_id = $2 AND e.status <> 'RESOLVED'))`,
+    [eventId, responderId ?? null],
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function updateMonitoringEventStatus(
   eventId: string,
   nextStatus: 'ACKNOWLEDGED' | 'RESOLVED',
   actorId: string,
+  completionNote?: string,
 ) {
   const expectedStatus =
     nextStatus === 'ACKNOWLEDGED' ? 'OPEN' : 'ACKNOWLEDGED';
@@ -158,6 +181,10 @@ export async function updateMonitoringEventStatus(
           resolved_at = CASE
             WHEN $2::event_status = 'RESOLVED' THEN NOW()
             ELSE resolved_at
+          END,
+          completion_note = CASE
+            WHEN $2::event_status = 'RESOLVED' THEN $5
+            ELSE completion_note
           END
       WHERE id = $1
         AND status = $4::event_status
@@ -185,7 +212,7 @@ export async function updateMonitoringEventStatus(
     SELECT updated_event.*
     FROM updated_event
     JOIN audit_entry ON TRUE`,
-    [eventId, nextStatus, actorId, expectedStatus],
+    [eventId, nextStatus, actorId, expectedStatus, completionNote?.trim() || null],
   );
   return result.rows[0] ?? null;
 }

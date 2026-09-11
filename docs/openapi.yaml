@@ -11,6 +11,7 @@ security:
 tags:
   - { name: Health }
   - { name: Authentication }
+  - { name: Users }
   - { name: Devices }
   - { name: Device groups }
   - { name: Events }
@@ -96,6 +97,52 @@ paths:
         '204': { description: Signed out and cookie cleared. }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/InvalidOrigin' }
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List user accounts
+      description: Admin only. Password hashes and session information are never returned.
+      responses:
+        '200':
+          description: Accounts ordered by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: '#/components/schemas/ManagedUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Users]
+      summary: Create a user account
+      description: Admin only. Creates the user and USER_CREATED audit record atomically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateUserRequest' }
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: '#/components/schemas/ManagedUser' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: An account with the email already exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   /api/devices:
     get:
       tags: [Devices]
@@ -453,6 +500,26 @@ paths:
         '400': { $ref: '#/components/responses/InvalidInput' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/events/{eventId}:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    get:
+      tags: [Events]
+      summary: Get monitoring event detail
+      description: Admin and Monitor can view any event. A Responder can view only their own unresolved assignment.
+      responses:
+        '200':
+          description: Complete event lifecycle detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event]
+                properties:
+                  event: { $ref: '#/components/schemas/MonitoringEvent' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/events/{eventId}/status:
     parameters:
       - { $ref: '#/components/parameters/EventId' }
@@ -567,7 +634,7 @@ paths:
     get:
       tags: [Audit]
       summary: Search and filter audit records
-      description: Admin only. Supplied filters use AND semantics.
+      description: Admin can search all records. Monitor and Responder results are forcibly scoped to their authenticated actor ID. Supplied filters use AND semantics.
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
         - name: search
@@ -599,10 +666,10 @@ paths:
     get:
       tags: [Audit]
       summary: Get available audit filter values
-      description: Admin only.
+      description: Admin receives global choices. Monitor and Responder receive choices derived only from their own records.
       responses:
         '200':
-          description: Filter choices from existing records.
+          description: Filter choices from permitted records.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AuditFilterOptions' }
@@ -702,6 +769,25 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/UserRole' }
+    ManagedUser:
+      type: object
+      additionalProperties: false
+      required: [id, name, email, role, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/UserRole' }
+        created_at: { type: string, format: date-time }
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [name, email, password, role]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        email: { type: string, format: email, maxLength: 320 }
+        password: { type: string, minLength: 12, maxLength: 1024 }
         role: { $ref: '#/components/schemas/UserRole' }
     UserEnvelope:
       type: object

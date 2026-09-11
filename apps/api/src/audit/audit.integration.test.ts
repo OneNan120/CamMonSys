@@ -170,17 +170,14 @@ it('lets an Admin list audit records', async () => {
   );
 });
 
-it('rejects Monitor and Responder users', async () => {
-  for (const email of [monitorEmail, responderEmail]) {
+it('limits Monitor and Responder users to their own audit records', async () => {
+  for (const [email, userId] of [[monitorEmail, monitorId], [responderEmail, responderId]] as const) {
     const client = request.agent(app);
-
-    await client
-      .post('/api/auth/login')
-      .send({ email, password })
-      .expect(200);
-
-    await client.get('/api/audit-logs').expect(403);
-    await client.get('/api/audit-logs/filter-options').expect(403);
+    await client.post('/api/auth/login').send({ email, password }).expect(200);
+    const response = await client.get(`/api/audit-logs?actorId=${adminId}`).expect(200);
+    expect(response.body.auditLogs.every((log: { actor_id: string }) => log.actor_id === userId)).toBe(true);
+    const options = await client.get('/api/audit-logs/filter-options').expect(200);
+    expect(options.body.actors).toEqual([{ id: userId, name: userId === monitorId ? 'Audit Monitor' : 'Audit Responder' }]);
   }
 });
 

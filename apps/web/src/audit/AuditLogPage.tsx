@@ -1,120 +1,125 @@
-import { type FormEvent, useEffect, useState, } from 'react';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+
+import type { User } from '../auth/auth-api';
+import { useMonitoringStream } from '../monitoring/MonitoringStreamContext';
 import {
   listAuditFilterOptions,
   listAuditLogs,
   type AuditFilterOptions,
-  type AuditLog,
-  type AuditLogFilters,
 } from './audit-api';
 
-type TimeRange =
-  | 'all'
-  | '24-hours'
-  | '7-days'
-  | '30-days'
-  | 'custom';
-
-const emptyOptions: AuditFilterOptions = {
+const empty: AuditFilterOptions = {
   actors: [],
   actions: [],
   targetTypes: [],
 };
 
-const initialFilters: AuditLogFilters = {
-  limit: 100,
-  sort: 'newest',
-};
-
-function formatAction(action: string) {
-  return action
+const label = (v: string) =>
+  v
     .toLowerCase()
     .split('_')
-    .map(
-      (part) =>
-        part.charAt(0).toUpperCase() + part.slice(1),
-    )
+    .map((p) => p[0]?.toUpperCase() + p.slice(1))
     .join(' ');
+
+const family = (a: string) =>
+  a.includes('ASSIGN')
+    ? 'assignment'
+    : a.includes('EVENT')
+      ? 'event'
+      : a.includes('DEVICE_GROUP') || a.includes('GROUP')
+        ? 'group'
+        : a.includes('DEVICE')
+          ? 'device'
+          : 'admin';
+
+const targetHref = (t: string, id: string) =>
+  t === 'DEVICE'
+    ? `/devices/${id}`
+    : t === 'EVENT'
+      ? `/events/${id}`
+      : t === 'DEVICE_GROUP'
+        ? `/device-groups?groupId=${id}`
+        : t === 'USER'
+          ? `/users?userId=${id}`
+          : '';
+
+function toLocalInput(iso: string) {
+  if (!iso) return '';
+
+  const d = new Date(iso);
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+
+  return local.toISOString().slice(0, 16);
 }
 
-function getPresetStart(timeRange: TimeRange) {
-  const now = Date.now();
+export function AuditLogPage({
+  currentUser,
+}: {
+  currentUser: User;
+}) {
+  const {
+    deviceRevision,
+    eventRevision,
+    connectionState,
+  } = useMonitoringStream();
 
-  switch (timeRange) {
-    case '24-hours':
-      return new Date(now - 24 * 60 * 60 * 1000).toISOString();
+  const [params, setParams] = useSearchParams();
 
-    case '7-days':
-      return new Date(
-        now - 7 * 24 * 60 * 60 * 1000,
-      ).toISOString();
+  const [draftSearch, setDraftSearch] = useState(
+    params.get('search') ?? '',
+  );
 
-    case '30-days':
-      return new Date(
-        now - 30 * 24 * 60 * 60 * 1000,
-      ).toISOString();
+  const [logs, setLogs] = useState<
+    Awaited<ReturnType<typeof listAuditLogs>>['auditLogs']
+  >([]);
 
-    default:
-      return undefined;
-  }
-}
-
-function localDateTimeToIso(value: string) {
-  if (!value) return undefined;
-
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime())
-    ? undefined
-    : date.toISOString();
-}
-
-export function AuditLogPage() {
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [options, setOptions] =
-    useState<AuditFilterOptions>(emptyOptions);
-
-  const [filters, setFilters] =
-    useState<AuditLogFilters>(initialFilters);
-
-  const [search, setSearch] = useState('');
-  const [actorId, setActorId] = useState('');
-  const [action, setAction] = useState('');
-  const [targetType, setTargetType] = useState('');
-  const [timeRange, setTimeRange] =
-    useState<TimeRange>('all');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-  const [sort, setSort] =
-    useState<'newest' | 'oldest'>('newest');
-  const [limit, setLimit] = useState(100);
-
+  const [options, setOptions] = useState(empty);
   const [loading, setLoading] = useState(true);
-  const [optionsError, setOptionsError] = useState('');
   const [error, setError] = useState('');
-  const [attempt, setAttempt] = useState(0);
+
+  const admin = currentUser.role === 'ADMIN';
+
+  const actorId = admin
+    ? (params.get('actorId') ?? '')
+    : currentUser.id;
 
   useEffect(() => {
     let active = true;
 
     listAuditFilterOptions()
-      .then((result) => {
-        if (active) {
-          setOptions(result);
-          setOptionsError('');
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setOptionsError(
-            'Unable to load audit filter options.',
-          );
-        }
-      });
+      .then((v) => active && setOptions(v))
+      .catch(
+        () => active && setError('Unable to load filter options.'),
+      );
 
     return () => {
       active = false;
     };
-  }, [attempt]);
+  }, [deviceRevision, eventRevision]);
+
+  useEffect(() => {
+    const current = params.get('search') ?? '';
+    setDraftSearch(current);
+  }, [params]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const current = params.get('search') ?? '';
+
+      if (draftSearch === current) return;
+
+      const next = new URLSearchParams(params);
+
+      draftSearch.trim()
+        ? next.set('search', draftSearch.trim())
+        : next.delete('search');
+
+      setParams(next, { replace: true });
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [draftSearch, params, setParams]);
 
   useEffect(() => {
     let active = true;
@@ -122,268 +127,290 @@ export function AuditLogPage() {
     setLoading(true);
     setError('');
 
-    listAuditLogs(filters)
-      .then(({ auditLogs }) => {
-        if (active) {
-          setAuditLogs(auditLogs);
-        }
-      })
-      .catch((error: unknown) => {
-        if (active) {
+    listAuditLogs({
+      limit: 100,
+      sort:
+        params.get('sort') === 'oldest'
+          ? 'oldest'
+          : 'newest',
+      actorId: actorId || undefined,
+      search: params.get('search') || undefined,
+      action: params.get('action') || undefined,
+      targetType: params.get('targetType') || undefined,
+      from: params.get('from') || undefined,
+      to: params.get('to') || undefined,
+    })
+      .then((r) => active && setLogs(r.auditLogs))
+      .catch(
+        (e: unknown) =>
+          active &&
           setError(
-            error instanceof Error
-              ? error.message
-              : 'Unable to load the audit log.',
-          );
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
+            e instanceof Error
+              ? e.message
+              : 'Unable to load audit history.',
+          ),
+      )
+      .finally(() => active && setLoading(false));
 
     return () => {
       active = false;
     };
-  }, [filters, attempt]);
+  }, [
+    params,
+    currentUser.id,
+    currentUser.role,
+    deviceRevision,
+    eventRevision,
+  ]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  const update = (key: string, value: string) => {
+    const n = new URLSearchParams(params);
 
-    const from =
-      timeRange === 'custom'
-        ? localDateTimeToIso(customFrom)
-        : getPresetStart(timeRange);
+    value ? n.set(key, value) : n.delete(key);
 
-    const to =
-      timeRange === 'custom'
-        ? localDateTimeToIso(customTo)
-        : undefined;
-
-    setFilters({
-      limit,
-      sort,
-      search: search.trim() || undefined,
-      actorId: actorId || undefined,
-      action: action || undefined,
-      targetType: targetType || undefined,
-      from,
-      to,
-    });
-  }
-
-  function handleReset() {
-    setSearch('');
-    setActorId('');
-    setAction('');
-    setTargetType('');
-    setTimeRange('all');
-    setCustomFrom('');
-    setCustomTo('');
-    setSort('newest');
-    setLimit(100);
-    setFilters(initialFilters);
-  }
+    setParams(n, { replace: true });
+  };
 
   return (
-    <section aria-labelledby="audit-log-heading">
-      <h1 id="audit-log-heading">Audit log</h1>
+    <section className="audit-page">
+      {connectionState === 'reconnecting' && (
+        <p className="stream-warning">
+          Live updates interrupted. Reconnecting…
+        </p>
+      )}
 
-      <form onSubmit={handleSubmit}>
-        <label>
-          Search
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">ACCOUNTABILITY</p>
+          <h2>{admin ? 'Audit Log' : 'My Audit Log'}</h2>
+          <p>
+            {admin
+              ? 'Trace administrative and monitoring activity.'
+              : 'Your own recorded monitoring activity.'}
+          </p>
+        </div>
+      </div>
+
+      <div className="audit-filter-bar">
+        <label className="device-search">
+          <span aria-hidden="true">⌕</span>
+          <span className="sr-only">Search audit log</span>
+
           <input
             type="search"
-            value={search}
-            maxLength={100}
-            placeholder="Actor, action, target type, or ID"
-            onChange={(event) => setSearch(event.target.value)}
+            value={draftSearch}
+            onChange={(e) => setDraftSearch(e.target.value)}
+            placeholder="Search actions, actors, and targets"
+          />
+
+          {draftSearch && (
+            <button
+              type="button"
+              aria-label="Clear audit search"
+              onClick={() => {
+                setDraftSearch('');
+                update('search', '');
+              }}
+            >
+              ×
+            </button>
+          )}
+        </label>
+
+        {admin && (
+          <label>
+            <span>Actor</span>
+
+            <select
+              value={actorId}
+              onChange={(e) =>
+                update('actorId', e.target.value)
+              }
+            >
+              <option value="">All actors</option>
+
+              {options.actors.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <label>
+          <span>Action</span>
+
+          <select
+            value={params.get('action') ?? ''}
+            onChange={(e) =>
+              update('action', e.target.value)
+            }
+          >
+            <option value="">All actions</option>
+
+            {options.actions.map((a) => (
+              <option key={a} value={a}>
+                {label(a)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span>Target</span>
+
+          <select
+            value={params.get('targetType') ?? ''}
+            onChange={(e) =>
+              update('targetType', e.target.value)
+            }
+          >
+            <option value="">All targets</option>
+
+            {options.targetTypes.map((t) => (
+              <option key={t} value={t}>
+                {label(t)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span>From</span>
+
+          <input
+            type="datetime-local"
+            value={toLocalInput(params.get('from') ?? '')}
+            onChange={(e) =>
+              update(
+                'from',
+                e.target.value
+                  ? new Date(e.target.value).toISOString()
+                  : '',
+              )
+            }
           />
         </label>
 
         <label>
-          Actor
-          <select
-            value={actorId}
-            onChange={(event) => setActorId(event.target.value)}
-          >
-            <option value="">All actors</option>
+          <span>To</span>
 
-            {options.actors.map((actor) => (
-              <option key={actor.id} value={actor.id}>
-                {actor.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Event or action type
-          <select
-            value={action}
-            onChange={(event) => setAction(event.target.value)}
-          >
-            <option value="">All actions</option>
-
-            {options.actions.map((option) => (
-              <option key={option} value={option}>
-                {formatAction(option)}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Target type
-          <select
-            value={targetType}
-            onChange={(event) =>
-              setTargetType(event.target.value)
+          <input
+            type="datetime-local"
+            value={toLocalInput(params.get('to') ?? '')}
+            onChange={(e) =>
+              update(
+                'to',
+                e.target.value
+                  ? new Date(e.target.value).toISOString()
+                  : '',
+              )
             }
-          >
-            <option value="">All target types</option>
-
-            {options.targetTypes.map((option) => (
-              <option key={option} value={option}>
-                {formatAction(option)}
-              </option>
-            ))}
-          </select>
+          />
         </label>
 
         <label>
-          Time
+          <span>Sort</span>
+
           <select
-            value={timeRange}
-            onChange={(event) =>
-              setTimeRange(event.target.value as TimeRange)
-            }
-          >
-            <option value="all">All time</option>
-            <option value="24-hours">Last 24 hours</option>
-            <option value="7-days">Last 7 days</option>
-            <option value="30-days">Last 30 days</option>
-            <option value="custom">Custom range</option>
-          </select>
-        </label>
-
-        {timeRange === 'custom' && (
-          <>
-            <label>
-              From
-              <input
-                type="datetime-local"
-                value={customFrom}
-                onChange={(event) =>
-                  setCustomFrom(event.target.value)
-                }
-              />
-            </label>
-
-            <label>
-              To
-              <input
-                type="datetime-local"
-                value={customTo}
-                min={customFrom || undefined}
-                onChange={(event) =>
-                  setCustomTo(event.target.value)
-                }
-              />
-            </label>
-          </>
-        )}
-
-        <label>
-          Sort
-          <select
-            value={sort}
-            onChange={(event) =>
-              setSort(
-                event.target.value as 'newest' | 'oldest',
+            value={params.get('sort') ?? 'newest'}
+            onChange={(e) =>
+              update(
+                'sort',
+                e.target.value === 'newest'
+                  ? ''
+                  : e.target.value,
               )
             }
           >
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
           </select>
         </label>
 
-        <label>
-          Number of records
-          <select
-            value={limit}
-            onChange={(event) =>
-              setLimit(Number(event.target.value))
-            }
-          >
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-            <option value={200}>200</option>
-          </select>
-        </label>
-
-        <button type="submit" disabled={loading}>
-          {loading ? 'Loading…' : 'Apply filters'}
-        </button>
-
         <button
           type="button"
-          disabled={loading}
-          onClick={handleReset}
+          className="button-quiet"
+          onClick={() => {
+            setDraftSearch('');
+            setParams(new URLSearchParams(), {
+              replace: true,
+            });
+          }}
         >
-          Reset filters
+          Clear all filters
         </button>
+      </div>
 
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => setAttempt((value) => value + 1)}
-        >
-          Refresh
-        </button>
-      </form>
+      <div className="audit-legend">
+        <span className="device">Device</span>
+        <span className="event">Event</span>
+        <span className="assignment">Assignment</span>
+        <span className="group">Group</span>
+        <span className="admin">Administration</span>
+      </div>
 
-      {optionsError && <p role="alert">{optionsError}</p>}
-
-      {loading && auditLogs.length === 0 ? (
-        <p role="status">Loading audit log…</p>
+      {loading && logs.length === 0 ? (
+        <p role="status">Loading audit history…</p>
       ) : error ? (
         <p role="alert">{error}</p>
-      ) : auditLogs.length === 0 ? (
-        <p>No audit records match the selected filters.</p>
+      ) : logs.length === 0 ? (
+        <p className="empty-panel">
+          No audit records match these filters.
+        </p>
       ) : (
-        <>
-          <p>{auditLogs.length} records shown</p>
+        <ol className="audit-list">
+          {logs.map((log) => {
+            const href = targetHref(
+              log.target_type,
+              log.target_id,
+            );
 
-          <ol>
-            {auditLogs.map((auditLog) => (
-              <li key={auditLog.id}>
+            return (
+              <li
+                key={log.id}
+                className={`audit-row audit-${family(log.action)}`}
+              >
+                <div>
+                  <strong>{label(log.action)}</strong>
+                  <time>
+                    {new Date(
+                      log.created_at,
+                    ).toLocaleString()}
+                  </time>
+                </div>
+
                 <p>
-                  <strong>
-                    {formatAction(auditLog.action)}
-                  </strong>
+                  Actor:{' '}
+                  <button
+                    className="inline-button"
+                    onClick={() =>
+                      update('actorId', log.actor_id)
+                    }
+                  >
+                    {log.actor_name}
+                  </button>
                 </p>
 
-                <p>Actor: {auditLog.actor_name}</p>
-
                 <p>
-                  Target: {auditLog.target_type} ·{' '}
-                  <code>{auditLog.target_id}</code>
-                </p>
-
-                <p>
-                  Time:{' '}
-                  {new Date(
-                    auditLog.created_at,
-                  ).toLocaleString()}
+                  Target:{' '}
+                  {href ? (
+                    <Link to={href}>
+                      {label(log.target_type)} ·{' '}
+                      {log.target_id}
+                    </Link>
+                  ) : (
+                    <span>
+                      {label(log.target_type)} ·{' '}
+                      {log.target_id}
+                    </span>
+                  )}
                 </p>
               </li>
-            ))}
-          </ol>
-        </>
+            );
+          })}
+        </ol>
       )}
     </section>
   );

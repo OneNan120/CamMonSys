@@ -1,20 +1,13 @@
-import {
-  type FormEvent,
-  useState,
-} from 'react';
+import { type FormEvent, useState, } from 'react';
 import { ApiError } from '../api';
 import { reauthenticate } from './auth-api';
 
 export function AdminLockScreen({
   adminName,
-  signingOut,
   onUnlock,
-  onSignOut,
 }: {
   adminName: string;
-  signingOut: boolean;
   onUnlock: () => void;
-  onSignOut: () => void;
 }) {
   const [password, setPassword] = useState('');
   const [unlocking, setUnlocking] = useState(false);
@@ -69,7 +62,7 @@ export function AdminLockScreen({
               value={password}
               autoComplete="current-password"
               autoFocus
-              disabled={unlocking || signingOut}
+              disabled={unlocking}
               onChange={(event) => {
                 setPassword(event.target.value);
               }}
@@ -80,7 +73,6 @@ export function AdminLockScreen({
             type="submit"
             disabled={
               unlocking ||
-              signingOut ||
               password.length === 0
             }
           >
@@ -90,13 +82,6 @@ export function AdminLockScreen({
 
         {error && <p role="alert">{error}</p>}
 
-        <button
-          type="button"
-          disabled={unlocking || signingOut}
-          onClick={onSignOut}
-        >
-          {signingOut ? 'Signing out…' : 'Sign out'}
-        </button>
       </section>
     </main>
   );

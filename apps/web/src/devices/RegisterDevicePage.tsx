@@ -1,4 +1,5 @@
 import { useState, useEffect, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { createDevice } from './device-api';
 import { createDeviceGroup, listDeviceGroups, type DeviceGroup } from '../device-groups/device-group-api';
 
@@ -113,10 +114,11 @@ export function RegisterDevicePage() {
   }
 
   return (
-    <section>
-      <h1>Register device</h1>
+    <section className="form-page">
+      <Link className="back-link" to="/devices">← Back to devices</Link>
+      <div className="page-heading"><div><p className="eyebrow">DEVICE MANAGEMENT</p><h2>Register device</h2><p>Add a camera endpoint to the monitoring network.</p></div></div>
 
-      <form onSubmit={handleSubmit}>
+      <form className="form-panel" onSubmit={handleSubmit}>
         <fieldset disabled={submitting}>
           <legend>Device details</legend>
 
@@ -179,9 +181,9 @@ export function RegisterDevicePage() {
 
           {groupsError && <p role="alert">{groupsError}</p>}
 
-          <button type="submit">
+          <div className="form-actions"><Link className="button-secondary" to="/devices">Cancel</Link><button type="submit">
             {submitting ? 'Registering…' : 'Register device'}
-          </button>
+          </button></div>
         </fieldset>
 
         {error && <p role="alert">{error}</p>}

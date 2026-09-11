@@ -1,9 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import { Room, RoomEvent, Track, type RemoteTrack, } from 'livekit-client';
+import {
+  Room,
+  RoomEvent,
+  Track,
+  type RemoteTrack,
+} from 'livekit-client';
+
 import { getViewingConnection } from './camera-api';
 
-export function CameraViewer({ deviceId, online, streamVersion }: { deviceId: string; online: boolean; streamVersion: string | null; }) {
+export function CameraViewer({
+  deviceId,
+  online,
+  streamVersion,
+}: {
+  deviceId: string;
+  online: boolean;
+  streamVersion: string | null;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
+
   const [status, setStatus] = useState('Connecting…');
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -14,51 +29,59 @@ export function CameraViewer({ deviceId, online, streamVersion }: { deviceId: st
       setError('');
       return;
     }
+
     const room = new Room();
+
     let cancelled = false;
-    let attachedTrack: RemoteTrack | undefined;
+    let attached: RemoteTrack | undefined;
+
+    const detach = () => {
+      if (videoRef.current) {
+        attached?.detach(videoRef.current);
+        videoRef.current.srcObject = null;
+      }
+
+      attached = undefined;
+    };
 
     setStatus('Connecting…');
     setError('');
 
-    function detachVideo() {
-      const video = videoRef.current;
-
-      if (video) {
-        attachedTrack?.detach(video);
-        video.srcObject = null;
+    room.on(RoomEvent.TrackSubscribed, (track) => {
+      if (
+        cancelled ||
+        track.kind !== Track.Kind.Video ||
+        !videoRef.current
+      ) {
+        return;
       }
 
-      attachedTrack = undefined;
-    }
+      detach();
+      attached = track;
+      track.attach(videoRef.current);
 
-    room.on(RoomEvent.TrackSubscribed, (track) => {
-      if (cancelled || track.kind !== Track.Kind.Video) return;
-
-      const video = videoRef.current;
-      if (!video) return;
-
-      detachVideo();
-      attachedTrack = track;
-      track.attach(video);
       setStatus('Receiving video');
     });
 
     room.on(RoomEvent.TrackUnsubscribed, (track) => {
-      if (cancelled || track !== attachedTrack) return;
+      if (cancelled || track !== attached) return;
 
-      detachVideo();
+      detach();
       setStatus('Waiting for camera video…');
     });
 
     room.on(RoomEvent.Reconnecting, () => {
-      if (!cancelled) setStatus('Reconnecting…');
+      if (!cancelled) {
+        setStatus('Reconnecting…');
+      }
     });
 
     room.on(RoomEvent.Reconnected, () => {
       if (!cancelled) {
         setStatus(
-          attachedTrack ? 'Receiving video' : 'Waiting for camera video…',
+          attached
+            ? 'Receiving video'
+            : 'Waiting for camera video…',
         );
       }
     });
@@ -66,76 +89,116 @@ export function CameraViewer({ deviceId, online, streamVersion }: { deviceId: st
     room.on(RoomEvent.Disconnected, () => {
       if (cancelled) return;
 
-      detachVideo();
+      detach();
       setStatus('Disconnected');
-      setError('The video connection ended. Retry to reconnect.');
+      setError(
+        'The video connection ended. Retry to reconnect.',
+      );
     });
 
-    async function connect() {
+    const connect = async () => {
       try {
-        const connection = await getViewingConnection(deviceId);
+        const connection =
+          await getViewingConnection(deviceId);
 
         if (cancelled) return;
 
-        await room.connect(connection.serverUrl, connection.token, {
-          autoSubscribe: true,
-        });
+        await room.connect(
+          connection.serverUrl,
+          connection.token,
+          {
+            autoSubscribe: true,
+          },
+        );
 
         if (cancelled) {
           await room.disconnect();
           return;
         }
 
-        if (!attachedTrack) {
+        if (!attached) {
           setStatus('Waiting for camera video…');
         }
-      } catch (error: unknown) {
+      } catch (caught) {
         if (cancelled) return;
 
-        // Prevent cleanup from replacing the original error message.
         room.removeAllListeners();
-        detachVideo();
+        detach();
+
         await room.disconnect().catch(() => {});
 
-        if (cancelled) return;
+        if (!cancelled) {
+          setStatus('Unable to connect');
 
-        setStatus('Unable to connect');
-        setError(
-          error instanceof Error ? error.message : 'Unable to load video.',
-        );
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : 'Unable to load video.',
+          );
+        }
       }
-    }
+    };
 
     void connect();
 
     return () => {
       cancelled = true;
+
       room.removeAllListeners();
-      detachVideo();
+      detach();
+
       void room.disconnect().catch(() => {});
     };
-  }, [deviceId, online, streamVersion, attempt]);
+  }, [
+    deviceId,
+    online,
+    streamVersion,
+    attempt,
+  ]);
 
   return (
-    <section aria-label="Camera feed">
-      <h2>Live camera</h2>
-      <p role="status">{status}</p>
+    <section
+      className={`camera-viewer ${
+        online ? 'is-online' : 'is-offline'
+      }`}
+      aria-label="Camera feed"
+    >
+      {!online || !streamVersion ? (
+        <div className="camera-offline-state">
+          <span aria-hidden="true">◉</span>
+          <strong>Camera unavailable</strong>
+          <small>
+            Waiting for this device to start reporting.
+          </small>
+        </div>
+      ) : (
+        <>
+          <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            controls
+            aria-label="Remote camera video"
+          />
 
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        controls
-        aria-label="Remote camera video"
-        style={{ width: '100%', maxWidth: 720, background: '#111' }}
-      />
+          <div className="camera-viewer-status">
+            <span role="status">{status}</span>
 
-      {error && <p role="alert">{error}</p>}
+            {error && (
+              <span role="alert">{error}</span>
+            )}
 
-      <button onClick={() => setAttempt((value) => value + 1)} disabled={!online}>
-        Reconnect
-      </button>
+            <button
+              onClick={() =>
+                setAttempt((value) => value + 1)
+              }
+            >
+              Reconnect
+            </button>
+          </div>
+        </>
+      )}
     </section>
   );
 }

@@ -101,7 +101,9 @@ export async function listAuditLogs(filters: AuditLogFilters) {
   return result.rows;
 }
 
-export async function listAuditLogFilterOptions() {
+export async function listAuditLogFilterOptions(actorId?: string) {
+  const actorCondition = actorId ? 'WHERE audit.actor_id = $1' : '';
+  const parameters = actorId ? [actorId] : [];
   const [actors, actions, targetTypes] = await Promise.all([
     pool.query(
       `SELECT DISTINCT
@@ -110,17 +112,23 @@ export async function listAuditLogFilterOptions() {
        FROM audit_logs AS audit
        JOIN users AS actor
          ON actor.id = audit.actor_id
+       ${actorCondition}
        ORDER BY actor.name, actor.id`,
+      parameters,
     ),
     pool.query<{ action: string }>(
       `SELECT DISTINCT action
-       FROM audit_logs
+       FROM audit_logs AS audit
+       ${actorCondition}
        ORDER BY action`,
+      parameters,
     ),
     pool.query<{ target_type: string }>(
       `SELECT DISTINCT target_type
-       FROM audit_logs
+       FROM audit_logs AS audit
+       ${actorCondition}
        ORDER BY target_type`,
+      parameters,
     ),
   ]);
 

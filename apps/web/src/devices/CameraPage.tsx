@@ -221,6 +221,20 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
   }
 
   useEffect(() => {
+    if (status !== 'Publishing') return;
+    const message = 'Leaving this page will stop the camera publication.';
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    const interceptLink = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target.closest('a[href]') : null;
+      if (!target || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (!window.confirm(message)) { event.preventDefault(); event.stopPropagation(); }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    document.addEventListener('click', interceptLink, true);
+    return () => { window.removeEventListener('beforeunload', beforeUnload); document.removeEventListener('click', interceptLink, true); };
+  }, [status]);
+
+  useEffect(() => {
     // Defer one task so StrictMode's setup/cleanup probe cannot start
     // a second permission request. Manual Stop does not restart this effect.
     const startup = window.setTimeout(() => void start(), 0);
@@ -237,8 +251,9 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
   }, [deviceId]);
 
   return (
-    <section>
-      <h1>Camera</h1>
+    <section className="camera-control-page">
+      <div className="page-heading"><div><p className="eyebrow">CAMERA PUBLISHER</p><h2>Camera controls</h2></div></div>
+      <p className="camera-lifecycle-note">This camera publishes only while this page remains open. Leaving or pressing Stop ends the session.</p>
       <p role="status">{status}</p>
 
       <video
@@ -247,10 +262,10 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
         muted
         playsInline
         aria-label="Local camera preview"
-        style={{ width: '100%', maxWidth: 720, background: '#111' }}
+        className="camera-preview"
       />
 
-      <div>
+      <div className="camera-actions">
         <button
           onClick={() => void start()}
           disabled={busy || status !== 'Stopped'}

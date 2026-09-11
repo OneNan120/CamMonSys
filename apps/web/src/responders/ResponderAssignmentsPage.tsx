@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listMyAssignments, type MonitoringEvent, updateEventStatus } from '../devices/event-api';
+import { useMonitoringStream } from '../monitoring/MonitoringStreamContext';
 
 export function ResponderAssignmentsPage() {
+    const { eventRevision, connectionState } = useMonitoringStream();
     const [assignments, setAssignments] = useState<MonitoringEvent[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
@@ -17,7 +19,7 @@ export function ResponderAssignmentsPage() {
         let refreshing = false;
         let refreshAgain = false;
 
-        setLoading(true);
+        if (assignments.length === 0) setLoading(true);
         setLoadError('');
         setRefreshError('');
 
@@ -70,33 +72,8 @@ export function ResponderAssignmentsPage() {
 
         void refreshAssignments(true);
 
-        const source = new EventSource('/api/stream');
-
-        source.addEventListener('events-changed', () => {
-            void refreshAssignments();
-        });
-
-        source.onerror = () => {
-            if (active) {
-                setRefreshError(
-                    'Live updates disconnected. Reconnecting; displayed data may be outdated.',
-                );
-            }
-        };
-
-        source.addEventListener('access-ended', () => {
-            active = false;
-            source.close();
-            setAssignments([]);
-            setLoadError('Your monitoring access ended. Sign in again.');
-            setLoading(false);
-        });
-
-        return () => {
-            active = false;
-            source.close();
-        };
-        }, [attempt]);
+        return () => { active = false; };
+        }, [attempt, eventRevision]);
 
         async function handleStatusUpdate(
     assignment: MonitoringEvent,
@@ -150,7 +127,7 @@ export function ResponderAssignmentsPage() {
     }
 
     return (
-        <section aria-labelledby="assignments-heading">
+        <section aria-labelledby="assignments-heading">{connectionState==='reconnecting'&&<p className="stream-warning">Live updates interrupted. Reconnecting…</p>}
             <h1 id="assignments-heading">My assignments</h1>
 
             {refreshError && <p role="alert">{refreshError}</p>}

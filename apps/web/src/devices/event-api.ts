@@ -78,3 +78,6 @@ export function listMyAssignments() {
     '/api/events?assignedTo=me',
   );
 }
+export function getEvent(eventId: string) {
+  return apiRequest<{ event: MonitoringEvent }>(`/api/events/${encodeURIComponent(eventId)}`);
+}

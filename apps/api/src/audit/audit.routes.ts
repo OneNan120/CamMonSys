@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
-import { requireRole } from '../auth/require-role.js';
 import { listAuditLogs, listAuditLogFilterOptions } from './audit.service.js';
 
 export const auditRouter = Router();
@@ -32,9 +31,11 @@ const listAuditQuerySchema = z
 auditRouter.get(
   '/filter-options',
   requireAuth,
-  requireRole('ADMIN'),
   async (_request, response) => {
-    const options = await listAuditLogFilterOptions();
+    const user = response.locals.user;
+    const options = await listAuditLogFilterOptions(
+      user.role === 'ADMIN' ? undefined : user.id,
+    );
     response.json(options);
   },
 );
@@ -42,7 +43,6 @@ auditRouter.get(
 auditRouter.get(
   '/',
   requireAuth,
-  requireRole('ADMIN'),
   async (request, response) => {
     const parsed = listAuditQuerySchema.safeParse(request.query);
 
@@ -56,10 +56,11 @@ auditRouter.get(
       return;
     }
 
+    const user = response.locals.user;
     const auditLogs = await listAuditLogs({
       limit: parsed.data.limit,
       search: parsed.data.search || undefined,
-      actorId: parsed.data.actorId,
+      actorId: user.role === 'ADMIN' ? parsed.data.actorId : user.id,
       action: parsed.data.action,
       targetType: parsed.data.targetType,
       from: parsed.data.from,

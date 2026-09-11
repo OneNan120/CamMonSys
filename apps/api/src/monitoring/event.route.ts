@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
-import { listMonitoringEvents, monitoringEventExists, updateMonitoringEventStatus, assignMonitoringEvent, listResponderAssignments, responderHasOtherActiveDeviceAssignment, updateResponderEventStatus } from './monitoring-event.service.js';
+import { listMonitoringEvents, getMonitoringEvent, monitoringEventExists, updateMonitoringEventStatus, assignMonitoringEvent, listResponderAssignments, responderHasOtherActiveDeviceAssignment, updateResponderEventStatus } from './monitoring-event.service.js';
 import { notifyEventsChanged } from './monitoring-events.js';
 import { getActivePublishingSession } from '../devices/publishing.service.js';
 import { disconnectResponderFromCamera } from '../video/livekit.service.js';
@@ -128,6 +128,21 @@ eventRouter.get(
   },
 );
 
+eventRouter.get('/:eventId', requireAuth, async (request, response) => {
+  const eventId = eventIdSchema.safeParse(request.params.eventId);
+  if (!eventId.success) {
+    response.status(400).json({ error: { code: 'INVALID_INPUT', message: 'Provide a valid event ID.' } });
+    return;
+  }
+  const user = response.locals.user;
+  const event = await getMonitoringEvent(eventId.data, user.role === 'RESPONDER' ? user.id : undefined);
+  if (!event) {
+    response.status(404).json({ error: { code: 'NOT_FOUND', message: 'Event not found.' } });
+    return;
+  }
+  response.json({ event });
+});
+
 eventRouter.patch(
   '/:eventId/status',
   requireAuth,
@@ -225,6 +240,7 @@ eventRouter.patch(
       eventId.data,
       body.data.status,
       user.id,
+      body.data.status === 'RESOLVED' ? body.data.completionNote : undefined,
     );
 
     if (!event) {
