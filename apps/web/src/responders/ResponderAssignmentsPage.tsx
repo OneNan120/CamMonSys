@@ -157,7 +157,7 @@ export function ResponderAssignmentsPage() {
                             <p>Status: {assignment.status}</p>
                             <p>
                                 Device:{' '}
-                                <Link to={`/devices/${assignment.device_id}`}>
+                                <Link to={`/devices/${assignment.device_id}?eventId=${assignment.id}`}>
                                     {assignment.device_name}
                                 </Link>
                             </p>

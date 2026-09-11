@@ -168,7 +168,17 @@ export async function getMonitoringEvent(eventId: string, responderId?: string) 
     LEFT JOIN users AS acknowledged_by ON acknowledged_by.id = e.acknowledged_by_id
     LEFT JOIN users AS resolved_by ON resolved_by.id = e.resolved_by_id
     WHERE e.id = $1
-      AND ($2::uuid IS NULL OR (e.assigned_to_id = $2 AND e.status <> 'RESOLVED'))`,
+      AND (
+        $2::uuid IS NULL
+        OR e.assigned_to_id = $2
+        OR EXISTS (
+          SELECT 1
+          FROM audit_logs AS audit
+          WHERE audit.actor_id = $2
+            AND audit.target_type = 'EVENT'
+            AND audit.target_id = e.id
+        )
+      )`,
     [eventId, responderId ?? null],
   );
   return result.rows[0] ?? null;
@@ -191,7 +201,17 @@ export async function getMonitoringEventSnapshot(
      FROM events
      WHERE id = $1
        AND snapshot_data IS NOT NULL
-       AND ($2::uuid IS NULL OR (assigned_to_id = $2 AND status <> 'RESOLVED'))`,
+       AND (
+         $2::uuid IS NULL
+         OR assigned_to_id = $2
+         OR EXISTS (
+           SELECT 1
+           FROM audit_logs AS audit
+           WHERE audit.actor_id = $2
+             AND audit.target_type = 'EVENT'
+             AND audit.target_id = events.id
+         )
+       )`,
     [eventId, responderId ?? null],
   );
 

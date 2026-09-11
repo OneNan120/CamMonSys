@@ -14,6 +14,7 @@ import {
   type DeviceGroup,
 } from '../device-groups/device-group-api';
 import { EventCard } from '../events/EventCard';
+import { DashboardCameraPreview } from './DashboardCameraPreview';
 import { useMonitoringStream } from '../monitoring/MonitoringStreamContext';
 import {
   listResponders,
@@ -60,6 +61,9 @@ export function DeviceListPage({
 
   const [filter, setFilter] =
     useState<DashboardFilter>('all');
+
+  const [groupFilter, setGroupFilter] =
+    useState('all');
 
   const [attempt, setAttempt] = useState(0);
 
@@ -126,43 +130,85 @@ export function DeviceListPage({
     eventRevision,
   ]);
 
+  useEffect(() => {
+    if (
+      groupFilter !== 'all' &&
+      groupFilter !== 'ungrouped' &&
+      !groups.some(
+        (group) => group.id === groupFilter,
+      )
+    ) {
+      setGroupFilter('all');
+    }
+  }, [groupFilter, groups]);
+
+  const devicesInGroup = useMemo(
+    () =>
+      devices.filter((device) =>
+        groupFilter === 'all'
+          ? true
+          : groupFilter === 'ungrouped'
+            ? !device.group_id
+            : device.group_id === groupFilter,
+      ),
+    [devices, groupFilter],
+  );
+
+  const groupDeviceIds = useMemo(
+    () =>
+      new Set(
+        devicesInGroup.map(
+          (device) => device.id,
+        ),
+      ),
+    [devicesInGroup],
+  );
+
+  const eventsInGroup = useMemo(
+    () =>
+      events.filter((event) =>
+        groupDeviceIds.has(event.device_id),
+      ),
+    [events, groupDeviceIds],
+  );
+
   const onlineIds = useMemo(
     () =>
       new Set(
-        devices
+        devicesInGroup
           .filter(
             (d) => d.status === 'ONLINE',
           )
           .map((d) => d.id),
       ),
-    [devices],
+    [devicesInGroup],
   );
 
   const offlineIds = useMemo(
     () =>
       new Set(
-        devices
+        devicesInGroup
           .filter(
             (d) => d.status === 'OFFLINE',
           )
           .map((d) => d.id),
       ),
-    [devices],
+    [devicesInGroup],
   );
 
   const openIds = useMemo(
     () =>
       new Set(
-        events
+        eventsInGroup
           .filter(
             (e) => e.status === 'OPEN',
           )
           .map((e) => e.device_id),
       ),
-    [events],
+    [eventsInGroup],
   );
 
-  const shownDevices = devices.filter(
+  const shownDevices = devicesInGroup.filter(
     (d) =>
       filter === 'all' ||
       (filter === 'online' &&
@@ -173,7 +219,7 @@ export function DeviceListPage({
         openIds.has(d.id)),
   );
 
-  const shownEvents = events.filter(
+  const shownEvents = eventsInGroup.filter(
     (e) =>
       filter === 'all' ||
       (filter === 'online' &&
@@ -286,7 +332,7 @@ export function DeviceListPage({
             [
               'all',
               'Total Devices',
-              devices.length,
+              devicesInGroup.length,
             ],
             [
               'online',
@@ -301,7 +347,7 @@ export function DeviceListPage({
             [
               'open',
               'Open Events',
-              events.filter(
+              eventsInGroup.filter(
                 (e) =>
                   e.status === 'OPEN',
               ).length,
@@ -345,6 +391,54 @@ export function DeviceListPage({
             </button>
           ),
         )}
+
+        <div
+          className={`kpi-group-filter${
+            groupFilter !== 'all'
+              ? ' active'
+              : ''
+          }`}
+        >
+          <span
+            className="kpi-icon"
+            aria-hidden="true"
+          >
+            ◫
+          </span>
+
+          <div>
+            <label htmlFor="dashboard-group-filter">
+              Device group
+            </label>
+
+            <select
+              id="dashboard-group-filter"
+              value={groupFilter}
+              onChange={(event) =>
+                setGroupFilter(
+                  event.target.value,
+                )
+              }
+            >
+              <option value="all">
+                All groups
+              </option>
+
+              <option value="ungrouped">
+                Ungrouped
+              </option>
+
+              {groups.map((group) => (
+                <option
+                  key={group.id}
+                  value={group.id}
+                >
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       <div className="dashboard-columns">
@@ -378,19 +472,11 @@ export function DeviceListPage({
                     to={`/devices/${device.id}`}
                     key={device.id}
                   >
-                    <div
-                      className="camera-tile"
-                      aria-hidden="true"
-                    >
-                      <span>◉</span>
-
-                      <small>
-                        {device.status ===
-                        'ONLINE'
-                          ? 'Live camera available'
-                          : 'Camera offline'}
-                      </small>
-                    </div>
+                    <DashboardCameraPreview
+                      deviceId={device.id}
+                      online={device.status === 'ONLINE'}
+                      streamVersion={device.stream_version}
+                    />
 
                     <div className="device-card-body">
                       <div>

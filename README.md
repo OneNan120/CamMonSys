@@ -261,7 +261,7 @@ The publishing lease must be at least three times the heartbeat interval.
 
 ## Assessment status
 
-The functional assessment requirements are implemented: role-based authentication and refresh persistence, device registration, automatic camera-page startup, Online/Offline and Last Seen tracking, live device/event refreshes, persisted simulated alerts with captured snapshots, camera detail viewing, and the OPEN → ACKNOWLEDGED → RESOLVED workflow. Bonus work includes the Responder role, LiveKit video, groups/search/filtering, audit history, and API tests.
+The functional assessment requirements are implemented: role-based authentication and refresh persistence, device registration, automatic camera preview with explicit publication controls, Online/Offline and Last Seen tracking, live device/event refreshes, persisted simulated alerts with captured snapshots, camera detail viewing, and the OPEN → ACKNOWLEDGED → RESOLVED workflow. Bonus work includes the Responder role, LiveKit video, groups/search/filtering, audit history, and API tests.
 
 Responsive visual acceptance against the supplied Figma design and public deployment are the remaining submission phases. See [docs/plan.md](docs/plan.md) for the requirement-by-requirement audit and acceptance checklist.
 
@@ -273,4 +273,4 @@ No public deployment or public demo accounts are included. Run the system locall
 
 The SSE emitter and authentication attempt limiter are per-process; use one API instance until shared messaging/rate limiting is configured. Login and reauthentication are limited to 60 requests per IP per 15 minutes.
 
-An optional browser smoke script, scripts/camera-smoke.cjs, exercises automatic camera entry, lock/unlock, Stop, and camera layout widths of 375/768/1440 pixels. It requires Playwright and Chrome (or Playwright Chromium), a Vite server on port 5174, and mocks API/LiveKit traffic. Set PLAYWRIGHT_MODULE, CHROME_PATH and SMOKE_URL if needed. This does not verify real LiveKit transport or every screen's visual layout.
+An optional browser smoke script, scripts/camera-smoke.cjs, exercises automatic preview, explicit publication, lock/unlock, Stop publishing, and camera layout widths of 375/768/1440 pixels. It requires Playwright and Chrome (or Playwright Chromium), a Vite server on port 5174, and mocks API/LiveKit traffic. Set PLAYWRIGHT_MODULE, CHROME_PATH and SMOKE_URL if needed. This does not verify real LiveKit transport or every screen's visual layout.

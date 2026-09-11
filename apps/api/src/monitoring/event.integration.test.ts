@@ -986,6 +986,60 @@ it('lets an assigned Responder acknowledge and resolve with a completion note', 
       target_id: responderEventId,
     },
   ]);
+
+  // Audit participation preserves read-only history after reassignment.
+  await pool.query(
+    'UPDATE events SET assigned_to_id = $2 WHERE id = $1',
+    [responderEventId, secondResponderId],
+  );
+  await client.get(`/api/events/${responderEventId}`).expect(200);
+});
+
+it('keeps historical event access separate from active device and camera access', async () => {
+  const historyDeviceId = randomUUID();
+  const historyEventId = randomUUID();
+
+  await pool.query(
+    `INSERT INTO devices (id, name, location, created_by_id)
+     VALUES ($1, 'Historical camera', 'Archive', $2)`,
+    [historyDeviceId, adminId],
+  );
+  await pool.query(
+    `INSERT INTO events (
+       id, device_id, type, status, assigned_to_id, assigned_by_id,
+       instructions, acknowledged_by_id, acknowledged_at,
+       resolved_by_id, resolved_at
+     )
+     VALUES (
+       $1, $2, 'TEST_ALERT', 'RESOLVED', $3, $4,
+       'Historical response.', $3, NOW(), $3, NOW()
+     )`,
+    [historyEventId, historyDeviceId, responderId, adminId],
+  );
+  await pool.query(
+    `INSERT INTO audit_logs (actor_id, action, target_type, target_id)
+     VALUES ($1, 'EVENT_RESOLVED', 'EVENT', $2)`,
+    [responderId, historyEventId],
+  );
+
+  try {
+    const client = request.agent(app);
+    await client.post('/api/auth/login').send({
+      email: `event-responder-${responderId}@example.com`,
+      password,
+    }).expect(200);
+
+    await client.get(`/api/events/${historyEventId}`).expect(200);
+    await client.get(`/api/devices/${historyDeviceId}`).expect(403);
+    await client.post(`/api/devices/${historyDeviceId}/view-token`).expect(403);
+  } finally {
+    await pool.query(
+      "DELETE FROM audit_logs WHERE target_type = 'EVENT' AND target_id = $1",
+      [historyEventId],
+    );
+    await pool.query('DELETE FROM events WHERE id = $1', [historyEventId]);
+    await pool.query('DELETE FROM devices WHERE id = $1', [historyDeviceId]);
+  }
 });
 
 it('prevents a Responder from updating another Responders event', async () => {
@@ -1214,7 +1268,8 @@ it('stores a JPEG atomically with an alert and serves it only to authorized user
     `UPDATE events SET status = 'RESOLVED' WHERE id = $1`,
     [eventIdWithSnapshot],
   );
-  await responder.get(`/api/events/${eventIdWithSnapshot}/snapshot`).expect(404);
+  await responder.get(`/api/events/${eventIdWithSnapshot}/snapshot`).expect(200);
+  await responder.get(`/api/events/${eventIdWithSnapshot}`).expect(200);
   await request(app).get(`/api/events/${eventIdWithSnapshot}/snapshot`).expect(401);
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 
 import { ApiError } from '../api';
 import { CameraViewer } from '../devices/CameraViewer';
@@ -8,6 +8,11 @@ import {
   type DeviceSummary,
 } from '../devices/device-api';
 import { useMonitoringStream } from '../monitoring/MonitoringStreamContext';
+import {
+  listMyAssignments,
+  type MonitoringEvent,
+} from '../devices/event-api';
+import { EventSnapshot } from '../events/EventSnapshot';
 
 export function ResponderDevicePage() {
   const {
@@ -20,6 +25,9 @@ export function ResponderDevicePage() {
     deviceId: string;
   }>();
 
+  const [searchParams] = useSearchParams();
+  const selectedEventId = searchParams.get('eventId');
+
   const [device, setDevice] =
     useState<DeviceSummary | null>(null);
 
@@ -28,6 +36,8 @@ export function ResponderDevicePage() {
   const [refreshError, setRefreshError] =
     useState('');
   const [attempt, setAttempt] = useState(0);
+  const [assignedEvents, setAssignedEvents] = useState<MonitoringEvent[]>([]);
+  const [eventsError, setEventsError] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -89,6 +99,42 @@ export function ResponderDevicePage() {
     deviceRevision,
     eventRevision,
   ]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!deviceId) {
+      setAssignedEvents([]);
+      return;
+    }
+
+    listMyAssignments()
+      .then(({ events }) => {
+        if (active) {
+          setAssignedEvents(
+            events.filter((event) => event.device_id === deviceId),
+          );
+          setEventsError('');
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setEventsError(
+            'Unable to refresh snapshots for this assignment.',
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [deviceId, eventRevision, attempt]);
+
+  const selectedEvent = selectedEventId
+    ? assignedEvents.find((event) => event.id === selectedEventId)
+    : assignedEvents.length === 1
+      ? assignedEvents[0]
+      : undefined;
 
   return (
     <section aria-labelledby="assigned-camera-heading">
@@ -164,6 +210,28 @@ export function ResponderDevicePage() {
               device.stream_version
             }
           />
+
+          {eventsError && (
+            <p role="alert">{eventsError}</p>
+          )}
+
+          {selectedEvent ? (
+            <EventSnapshot
+              event={selectedEvent}
+              linkToEvent
+              heading="Assigned event snapshot"
+            />
+          ) : (
+            <section className="snapshot-panel snapshot-panel--empty">
+              <span aria-hidden="true">▧</span>
+              <h2>Assigned event snapshot</h2>
+              <p>
+                {selectedEventId
+                  ? 'That event is no longer an active assignment for this device.'
+                  : 'Open this camera from a specific assignment to view that event’s snapshot.'}
+              </p>
+            </section>
+          )}
         </>
       ) : null}
     </section>

@@ -259,7 +259,7 @@ export function App() {
             <div className="topbar-actions">
               <span className="environment-pill"><i /> {user.role} CONSOLE</span>
               {user.role === 'ADMIN' && (
-                <button type="button" className="button-secondary" onClick={handleLock}>
+                <button type="button" className="button-secondary topbar-lock" onClick={handleLock}>
                   Lock controls
                 </button>
               )}
@@ -290,7 +290,7 @@ export function App() {
                 <Route path="/devices" element={<RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}><DeviceDirectoryPage canRegister={user.role === 'ADMIN'} /></RequireRole>} />
                 <Route path="/events" element={<RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR']}><EventsPage /></RequireRole>} />
                 <Route path="/users" element={<RequireRole user={user} allowedRoles={['ADMIN']}><UsersPage /></RequireRole>} />
-                <Route path="/events/:eventId" element={<RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR', 'RESPONDER']}><EventDetailPage canAssign={user.role !== 'RESPONDER'} /></RequireRole>} />
+                <Route path="/events/:eventId" element={<RequireRole user={user} allowedRoles={['ADMIN', 'MONITOR', 'RESPONDER']}><EventDetailPage userRole={user.role} /></RequireRole>} />
                 <Route
                   path="/devices/new"
                   element={

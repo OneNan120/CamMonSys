@@ -12,10 +12,12 @@ export function CameraViewer({
   deviceId,
   online,
   streamVersion,
+  compact = false,
 }: {
   deviceId: string;
   online: boolean;
   streamVersion: string | null;
+  compact?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -158,7 +160,7 @@ export function CameraViewer({
 
   return (
     <section
-      className={`camera-viewer ${
+      className={`camera-viewer ${compact ? 'camera-viewer--compact' : ''} ${
         online ? 'is-online' : 'is-offline'
       }`}
       aria-label="Camera feed"
@@ -178,24 +180,28 @@ export function CameraViewer({
             autoPlay
             muted
             playsInline
-            controls
-            aria-label="Remote camera video"
+            controls={!compact}
+            aria-label={compact ? 'Live camera preview' : 'Remote camera video'}
           />
 
           <div className="camera-viewer-status">
-            <span role="status">{status}</span>
+            <span role="status">
+              {error && compact ? 'Preview unavailable' : status}
+            </span>
 
-            {error && (
+            {error && !compact && (
               <span role="alert">{error}</span>
             )}
 
-            <button
-              onClick={() =>
-                setAttempt((value) => value + 1)
-              }
-            >
-              Reconnect
-            </button>
+            {!compact && (
+              <button
+                onClick={() =>
+                  setAttempt((value) => value + 1)
+                }
+              >
+                Reconnect
+              </button>
+            )}
           </div>
         </>
       )}

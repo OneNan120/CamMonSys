@@ -17,10 +17,12 @@ import { EventAssignmentEditor } from './EventAssignmentEditor';
 import { EventSnapshot } from './EventSnapshot';
 
 export function EventDetailPage({
-  canAssign,
+  userRole,
 }: {
-  canAssign: boolean;
+  userRole: 'ADMIN' | 'MONITOR' | 'RESPONDER';
 }) {
+  const isResponder = userRole === 'RESPONDER';
+  const canAssign = !isResponder;
   const {
     eventRevision,
     connectionState,
@@ -133,8 +135,8 @@ export function EventDetailPage({
           {error}
         </p>
 
-        <Link to="/events">
-          Back to events
+        <Link to={isResponder ? '/' : '/events'}>
+          {isResponder ? 'Back to my assignments' : 'Back to events'}
         </Link>
       </section>
     );
@@ -182,9 +184,9 @@ export function EventDetailPage({
 
       <Link
         className="back-link"
-        to="/events"
+        to={isResponder ? '/' : '/events'}
       >
-        ← Back to events
+        {isResponder ? '← Back to my assignments' : '← Back to events'}
       </Link>
 
       <header className="event-hero">
@@ -198,11 +200,19 @@ export function EventDetailPage({
           </h2>
 
           <p>
-            <Link
-              to={`/devices/${event.device_id}`}
-            >
-              {event.device_name}
-            </Link>
+            {isResponder && event.status === 'RESOLVED' ? (
+              <span>{event.device_name}</span>
+            ) : (
+              <Link
+                to={
+                  isResponder
+                    ? `/devices/${event.device_id}?eventId=${event.id}`
+                    : `/devices/${event.device_id}`
+                }
+              >
+                {event.device_name}
+              </Link>
+            )}
 
             <span>
               ⌖ {event.device_location}

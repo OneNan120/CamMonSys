@@ -36,24 +36,26 @@ const assert = require('node:assert/strict');
       return route.fulfill({json:body});
     });
     await page.goto((process.env.SMOKE_URL || 'http://localhost:5174')+'/devices/'+id+'/camera');
-    await page.getByRole('status').filter({hasText:/^Publishing$/}).waitFor();
+    await page.getByRole('status').filter({hasText:/^Preview ready$/}).waitFor();
     assert.equal(await page.evaluate(() => window.captureCalls), 1);
+    await page.getByRole('button',{name:'Start publishing',exact:true}).click();
+    await page.getByRole('status').filter({hasText:/^Publishing$/}).waitFor();
     await page.getByRole('button',{name:'Lock controls',exact:true}).click();
     await page.getByRole('heading',{name:'Camera monitoring is locked'}).waitFor();
     assert.equal(await page.evaluate(() => window.captured.getVideoTracks()[0].readyState), 'live');
-    assert.equal(await page.getByRole('button',{name:'Stop',exact:true}).count(), 0);
+    assert.equal(await page.getByRole('button',{name:'Stop publishing',exact:true}).count(), 0);
     await page.getByLabel('Password').fill('mock-password');
     await page.getByRole('button',{name:'Unlock',exact:true}).click();
-    await page.getByRole('button',{name:'Stop',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Stop publishing',exact:true}).waitFor();
     assert.equal(await page.evaluate(() => window.captureCalls), 1);
     for (const width of [375,768,1440]) {
       await page.setViewportSize({width,height:900});
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
     }
-    await page.getByRole('button',{name:'Stop',exact:true}).click();
-    await page.getByRole('status').filter({hasText:/^Stopped$/}).waitFor();
-    assert.equal(await page.evaluate(() => window.captured.getVideoTracks()[0].readyState), 'ended');
+    await page.getByRole('button',{name:'Stop publishing',exact:true}).click();
+    await page.getByRole('status').filter({hasText:/^Preview ready$/}).waitFor();
+    assert.equal(await page.evaluate(() => window.captured.getVideoTracks()[0].readyState), 'live');
     assert.equal(await page.evaluate(() => window.captureCalls), 1);
-    console.log('PASS: automatic capture once, lock/unlock retains capture, Stop ends capture, 375/768/1440px no horizontal overflow.');
+    console.log('PASS: automatic preview once, explicit publication, lock/unlock retains preview, Stop returns to preview-only, 375/768/1440px no horizontal overflow.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

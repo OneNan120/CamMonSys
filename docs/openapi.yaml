@@ -523,7 +523,7 @@ paths:
     get:
       tags: [Events]
       summary: Get monitoring event detail
-      description: Admin and Monitor can view any event. A Responder can view only their own unresolved assignment.
+      description: Admin and Monitor can view any event. A Responder can view a current assignment or an event represented in their own audit history; historical access is read-only and does not grant device or live-video access.
       responses:
         '200':
           description: Complete event lifecycle detail.
@@ -543,7 +543,7 @@ paths:
     get:
       tags: [Events]
       summary: Get an event snapshot
-      description: Returns the JPEG snapshot to Admin/Monitor, or to the assigned Responder while the event is unresolved.
+      description: Returns the JPEG snapshot to Admin/Monitor, or to a Responder currently assigned to or historically audited on the event. Historical access does not grant device or live-video access.
       responses:
         '200':
           description: Snapshot image.

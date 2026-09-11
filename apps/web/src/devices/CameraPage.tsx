@@ -47,6 +47,7 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
   async function dispose(run: CameraRun) {
     run.cancelled = true;
     run.stopHeartbeat?.();
+    run.stopHeartbeat = undefined;
     run.room?.removeAllListeners();
     run.stream?.getTracks().forEach((track) => track.stop());
 
@@ -55,10 +56,13 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
       releaseReservation(run),
     ]);
 
+    run.room = undefined;
+    run.stream = undefined;
+
     return results.some((result) => result.status === 'rejected');
   }
 
-  async function stop(run: CameraRun, message = '') {
+  async function stopPreview(run: CameraRun, message = '') {
     if (runRef.current !== run || run.cancelled) return;
 
     setBusy(true);
@@ -76,12 +80,43 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
     setBusy(false);
     setError(
       cleanupFailed
-        ? 'Local camera stopped, but remote cleanup could not be confirmed. The lease will expire.'
+        ? 'Local preview stopped, but remote cleanup could not be confirmed. The lease will expire.'
         : message,
     );
   }
 
-  async function start() {
+  async function stopPublishing(run: CameraRun, message = '') {
+    if (runRef.current !== run || run.cancelled) return;
+
+    setBusy(true);
+    setStatus('Stopping publication…');
+    run.stopHeartbeat?.();
+    run.stopHeartbeat = undefined;
+    run.room?.removeAllListeners();
+
+    const results = await Promise.allSettled([
+      run.room?.disconnect(),
+      releaseReservation(run),
+    ]);
+
+    run.room = undefined;
+
+    if (runRef.current !== run || run.cancelled) return;
+
+    const previewAvailable = Boolean(
+      run.stream?.getVideoTracks().some((track) => track.readyState === 'live'),
+    );
+
+    setStatus(previewAvailable ? 'Preview ready' : 'Stopped');
+    setBusy(false);
+    setError(
+      results.some((result) => result.status === 'rejected')
+        ? 'Publication stopped locally, but remote cleanup could not be confirmed. The lease will expire.'
+        : message,
+    );
+  }
+
+  async function preparePreview() {
     if (runRef.current) return;
 
     const run: CameraRun = { cancelled: false };
@@ -110,7 +145,7 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
 
       for (const track of stream.getVideoTracks()) {
         track.addEventListener('ended', () => {
-          void stop(run, 'Camera capture ended. Start again to retry.');
+          void stopPreview(run, 'Camera capture ended. Reload the page to retry.');
         });
       }
 
@@ -122,12 +157,45 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
 
       if (run.cancelled) return;
 
-      setStatus('Reserving device…');
+      setStatus('Preview ready');
+      setBusy(false);
+    } catch (error: unknown) {
+      console.error('Camera preview failed:', error);
+      if (run.cancelled) return;
 
+      const message =
+        error instanceof DOMException && error.name === 'NotAllowedError'
+          ? 'Camera permission was denied. Allow access and reload this page.'
+          : error instanceof Error
+            ? error.message
+            : 'Unable to open the camera preview.';
+
+      await stopPreview(run, message);
+    }
+  }
+
+  async function startPublishing() {
+    const run = runRef.current;
+    const stream = run?.stream;
+
+    if (
+      !run
+      || run.cancelled
+      || !stream
+      || run.publishingSessionId
+      || stream.getVideoTracks().every((track) => track.readyState !== 'live')
+    ) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setStatus('Reserving device…');
+
+    try {
       const connection = await reserveCamera(deviceId);
       run.publishingSessionId = connection.publishingSessionId;
 
-      // Stop may have happened while the request was pending.
       if (run.cancelled) {
         await releaseReservation(run);
         return;
@@ -138,12 +206,11 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
 
       room.on(RoomEvent.Disconnected, (reason) => {
         console.error('LiveKit disconnected. Reason:', reason);
-        void stop(run, 'Video connection ended. Start again to retry.');
+        void stopPublishing(run, 'Video connection ended. Start publishing to retry.');
       });
 
-      // End this run instead of reporting heartbeats during reconnection.
       room.on(RoomEvent.Reconnecting, () => {
-        void stop(run, 'Video connection interrupted. Start again to retry.');
+        void stopPublishing(run, 'Video connection interrupted. Start publishing to retry.');
       });
 
       setStatus('Connecting video…');
@@ -163,38 +230,30 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
         deviceId,
         publishingSessionId: connection.publishingSessionId,
         intervalSeconds: connection.heartbeatIntervalSeconds,
-
         onSuccess: () => {
           if (run.cancelled) return;
           setStatus('Publishing');
           setError('');
         },
-
         onTemporaryFailure: () => {
           if (run.cancelled) return;
           setStatus('Video published; reporting interrupted');
           setError('Cannot report camera status. Retrying…');
         },
-
         onSessionEnded: () => {
-          void stop(run, 'Camera session expired. Start again.');
+          void stopPublishing(run, 'Camera session expired. Start publishing again.');
         },
       });
 
       setBusy(false);
     } catch (error: unknown) {
-      console.error('Camera startup failed:', error);
+      console.error('Camera publication failed:', error);
       if (run.cancelled) return;
 
-      const message =
-        error instanceof DOMException &&
-        error.name === 'NotAllowedError'
-          ? 'Camera permission was denied. Allow access and retry.'
-          : error instanceof Error
-            ? error.message
-            : 'Unable to start the camera.';
-
-      await stop(run, message);
+      await stopPublishing(
+        run,
+        error instanceof Error ? error.message : 'Unable to publish the camera.',
+      );
     }
   }
 
@@ -300,7 +359,7 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
   useEffect(() => {
     // Defer one task so StrictMode's setup/cleanup probe cannot start
     // a second permission request. Manual Stop does not restart this effect.
-    const startup = window.setTimeout(() => void start(), 0);
+    const startup = window.setTimeout(() => void preparePreview(), 0);
     return () => {
       window.clearTimeout(startup);
       const run = runRef.current;
@@ -316,8 +375,11 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
   return (
     <section className="camera-control-page">
       <div className="page-heading"><div><p className="eyebrow">CAMERA PUBLISHER</p><h2>Camera controls</h2></div></div>
-      <p className="camera-lifecycle-note">This camera publishes only while this page remains open. Leaving or pressing Stop ends the session.</p>
-      <p role="status">{status}</p>
+      <p className="camera-lifecycle-note">Permission opens a private local preview. The device stays Offline until you press Start publishing; leaving this page releases the camera.</p>
+      <div className="camera-preview-heading">
+        <strong>Local camera preview</strong>
+        <span role="status">{status}</span>
+      </div>
 
       <video
         ref={videoRef}
@@ -330,20 +392,20 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
 
       <div className="camera-actions">
         <button
-          onClick={() => void start()}
-          disabled={busy || status !== 'Stopped'}
+          onClick={() => void startPublishing()}
+          disabled={busy || status !== 'Preview ready'}
         >
-          Start camera
+          Start publishing
         </button>
 
         <button
           onClick={() => {
             const run = runRef.current;
-            if (run) void stop(run);
+            if (run) void stopPublishing(run);
           }}
-          disabled={status === 'Stopped' || status === 'Stopping…'}
+          disabled={!runRef.current?.publishingSessionId || busy}
         >
-          Stop
+          Stop publishing
         </button>
         <button
           onClick={() => void handleTestAlert()}
