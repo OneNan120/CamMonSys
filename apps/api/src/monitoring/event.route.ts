@@ -6,6 +6,8 @@ import { listMonitoringEvents, monitoringEventExists, updateMonitoringEventStatu
 import { notifyEventsChanged } from './monitoring-events.js';
 import { getActivePublishingSession } from '../devices/publishing.service.js';
 import { disconnectResponderFromCamera } from '../video/livekit.service.js';
+import { pool } from '../db.js';
+import { responderHasActiveDeviceAssignment } from './monitoring-event.service.js';
 
 export const eventRouter = Router();
 
@@ -42,11 +44,14 @@ async function disconnectResponderIfAccessEnded(
   deviceId: string,
   changedEventId: string,
 ): Promise<void> {
+  const client = await pool.connect();
+  try {
+  await client.query('BEGIN');
+  await client.query('SELECT id FROM devices WHERE id = $1 FOR UPDATE', [deviceId]);
   const hasAnotherAssignment =
-    await responderHasOtherActiveDeviceAssignment(
+    await responderHasActiveDeviceAssignment(
       responderId,
       deviceId,
-      changedEventId,
     );
 
   if (hasAnotherAssignment) {
@@ -65,6 +70,9 @@ async function disconnectResponderIfAccessEnded(
     publishingSession.publishing_session_id,
     responderId,
   );
+  } finally {
+    try { await client.query('ROLLBACK'); } finally { client.release(); }
+  }
 }
 
 eventRouter.get(

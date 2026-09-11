@@ -1,6 +1,7 @@
 import { env } from '../config.js';
 import { processRoomCleanup } from './room-cleanup.service.js';
 import { expirePublishingSessions } from '../devices/publishing.service.js';
+import { processResponderRevocations } from './responder-revocation.service.js';
 
 export function startRoomCleanupWorker() {
   let stopped = false;
@@ -11,6 +12,7 @@ export function startRoomCleanupWorker() {
     try {
         await expirePublishingSessions();
         await processRoomCleanup();
+        await processResponderRevocations();
     } catch {
       // Handles failures such as being unable to fetch pending records.
       console.error('Unable to run camera room cleanup.');

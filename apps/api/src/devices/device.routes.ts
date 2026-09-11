@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { pool } from '../db.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
@@ -507,6 +508,19 @@ deviceRouter.post(
       return;
     }
 
+    // Serialize token issuance with assignment revocation and room replacement.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT id FROM devices WHERE id = $1 FOR UPDATE', [deviceId]);
+      const current = await getActivePublishingSession(deviceId);
+      if (!(await canViewDevice(user, deviceId)) ||
+          current?.publishing_session_id !== session.publishing_session_id) {
+        response.status(409).json({
+          error: { code: 'CAMERA_ACCESS_CHANGED', message: 'Camera access changed. Refresh and retry.' },
+        });
+        return;
+      }
     const participantIdentity =
       user.role === 'RESPONDER'
         ? `responder-${user.id}`
@@ -521,5 +535,8 @@ deviceRouter.post(
 
     response.set('Cache-Control', 'no-store');
     response.json(connection);
+    } finally {
+      try { await client.query('ROLLBACK'); } finally { client.release(); }
+    }
   },
 );

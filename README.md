@@ -67,6 +67,8 @@ docker compose exec -T db psql -U cammon -d cammon < apps/api/sql/001_init.sql
 docker compose exec -T db psql -U cammon -d cammon < apps/api/sql/002_auth_sessions.sql
 docker compose exec -T db psql -U cammon -d cammon < apps/api/sql/003_publishing_lease.sql
 docker compose exec -T db psql -U cammon -d cammon < apps/api/sql/004_camera_room_cleanup.sql
+docker compose exec -T db psql -U cammon -d cammon -v ON_ERROR_STOP=1 < apps/api/sql/005_publication_readiness.sql
+docker compose exec -T db psql -U cammon -d cammon -v ON_ERROR_STOP=1 < apps/api/sql/006_responder_revocation.sql
 ```
 
 Create and initialize the isolated test database:
@@ -77,6 +79,8 @@ docker compose exec -T db psql -U cammon -d cammon_test < apps/api/sql/001_init.
 docker compose exec -T db psql -U cammon -d cammon_test < apps/api/sql/002_auth_sessions.sql
 docker compose exec -T db psql -U cammon -d cammon_test < apps/api/sql/003_publishing_lease.sql
 docker compose exec -T db psql -U cammon -d cammon_test < apps/api/sql/004_camera_room_cleanup.sql
+docker compose exec -T db psql -U cammon -d cammon_test -v ON_ERROR_STOP=1 < apps/api/sql/005_publication_readiness.sql
+docker compose exec -T db psql -U cammon -d cammon_test -v ON_ERROR_STOP=1 < apps/api/sql/006_responder_revocation.sql
 ```
 
 `createdb` reports an error if `cammon_test` already exists; in that case, continue with the SQL commands. Replace `cammon` in these commands if `.env` uses different database names or credentials.
@@ -147,7 +151,7 @@ npm run db:down
 1. An Admin registers a device and starts its camera page.
 2. The browser requests camera permission and publishes video to a LiveKit room scoped to the current publishing session.
 3. Heartbeats renew the publishing lease and update Last Seen.
-4. The camera page can create a test alert, motion event, or bed-exit event.
+4. The camera page creates Test Alerts; the API also accepts simulated motion and bed-exit types.
 5. PostgreSQL saves the event before the API emits an SSE invalidation signal.
 6. Admin and Monitor dashboards refetch authorized state without a full page reload.
 7. An Admin or Monitor may assign a Responder with instructions.
@@ -170,6 +174,12 @@ Transitions are atomic and reject stale or conflicting updates. Status changes a
 The API checks device access before issuing a short-lived LiveKit viewer token. Admin and Monitor users may view active devices. A Responder must have at least one unresolved assignment for the requested device.
 
 Responder viewer identities are deterministic, allowing the backend to disconnect an existing LiveKit participant after access ends. A Responder remains authorized if another active assignment still applies to the same device.
+
+Revocations are queued transactionally by a PostgreSQL trigger and retried by the cleanup worker after service failures. Immediate removal is attempted first. This depends on LiveKit Cloud token revocation; real Cloud failure/reconnect behavior still needs a live demo check.
+
+Camera capture starts on page entry. Locking controls keeps the mounted publication running; a reload while locked waits for password unlock before mounting the camera again. Stop remains stopped until explicitly started again.
+
+Publication readiness uses publishing_started_at so a new reservation cannot reuse historical Last Seen to claim Online. Logout clears owned publications and queues remote room cleanup.
 
 ## API overview
 
@@ -239,6 +249,7 @@ See `.env.example` for the complete list.
 - `CAMERA_PUBLISHING_LEASE_SECONDS`: time before a silent publisher is considered inactive
 - `CAMERA_CLEANUP_INTERVAL_SECONDS`: stale LiveKit room cleanup interval
 - `SSE_KEEPALIVE_INTERVAL_SECONDS`: SSE session-validation and keepalive interval
+- `APP_ORIGIN`: exact public HTTPS origin for mutation-origin validation behind a proxy
 - `DEMO_*`: demo account names, emails, and passwords used by the seed command
 
 The publishing lease must be at least three times the heartbeat interval.
@@ -246,3 +257,9 @@ The publishing lease must be at least three times the heartbeat interval.
 ## Current deployment status
 
 No public deployment or public demo accounts are included. Run the system locally or provide the documented runtime infrastructure and secrets for deployment.
+
+## Local verification limits
+
+The SSE emitter and authentication attempt limiter are per-process; use one API instance until shared messaging/rate limiting is configured. Login and reauthentication are limited to 60 requests per IP per 15 minutes.
+
+An optional browser smoke script, scripts/camera-smoke.cjs, exercises automatic camera entry, lock/unlock, Stop, and camera layout widths of 375/768/1440 pixels. It requires Playwright and Chrome (or Playwright Chromium), a Vite server on port 5174, and mocks API/LiveKit traffic. Set PLAYWRIGHT_MODULE, CHROME_PATH and SMOKE_URL if needed. This does not verify real LiveKit transport or every screen's visual layout.

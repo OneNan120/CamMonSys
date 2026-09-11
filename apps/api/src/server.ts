@@ -3,6 +3,7 @@ import { env } from './config.js';
 import { createApp } from './app.js';
 import { pool } from './db.js';
 import { startRoomCleanupWorker } from './video/room-cleanup.worker.js';
+import { closeMonitoringStreams } from './monitoring/monitoring-events.js';
 
 await pool.query('SELECT 1');
 
@@ -15,6 +16,7 @@ const server = app.listen(env.PORT, '0.0.0.0', () => console.log('API listening 
 const stopRoomCleanupWorker = startRoomCleanupWorker();
 
 function shutdown() {
+  closeMonitoringStreams();
   const timeout = setTimeout(() => process.exit(1), 10000);
   timeout.unref();
   server.close(() => {

@@ -25,6 +25,16 @@ export async function reservePublishingSession(
   try {
     await client.query('BEGIN');
 
+    // Serialize startup with logout before acquiring a device lock.
+    const owner = await client.query(
+      'SELECT id FROM auth_sessions WHERE id = $1 AND revoked_at IS NULL AND expires_at > NOW() FOR SHARE',
+      [ownerSessionId],
+    );
+    if (owner.rowCount !== 1) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
     const existing = await client.query<LockedDevice>(
       `SELECT
          publishing_session_id,
@@ -52,6 +62,7 @@ export async function reservePublishingSession(
     const result = await client.query<ReservedDevice>(
       `UPDATE devices
        SET publishing_session_id = $2,
+           publishing_started_at = clock_timestamp(),
            publishing_owner_session_id = $3,
            publishing_lease_expires_at =
              clock_timestamp() + ($4::integer * INTERVAL '1 second')
@@ -244,6 +255,7 @@ export async function getActivePublishingSession(deviceId: string) {
        AND deleted_at IS NULL
        AND publishing_session_id IS NOT NULL
        AND publishing_lease_expires_at > clock_timestamp()
+       AND (publishing_started_at IS NULL OR last_seen_at >= publishing_started_at)
        AND last_seen_at >
          clock_timestamp() - ($2::integer * INTERVAL '1 second')`,
     [deviceId, PUBLISHING_LEASE_SECONDS],

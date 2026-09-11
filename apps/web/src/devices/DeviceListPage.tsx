@@ -33,6 +33,24 @@ export function DeviceListPage() {
     useState<string | null>(null);
 
   const groupsRequestId = useRef(0);
+  const eventsRequestId = useRef(0);
+  const eventsActive = useRef(true);
+
+  async function refreshEventData() {
+    if (!eventsActive.current) return;
+    const requestId = ++eventsRequestId.current;
+    try {
+      const result = await listEvents();
+      if (eventsActive.current && requestId === eventsRequestId.current) {
+        setEvents(result.events);
+        setEventsError('');
+      }
+    } catch {
+      if (eventsActive.current && requestId === eventsRequestId.current) {
+        setEventsError('Unable to refresh monitoring events. Displayed data may be outdated.');
+      }
+    }
+  }
 
   function applyGroups(nextGroups: DeviceGroup[]) {
     setGroups(nextGroups);
@@ -111,23 +129,12 @@ export function DeviceListPage() {
   }, [attempt]);
 
   useEffect(() => {
-    let active = true;
-
-    listEvents()
-      .then(({ events }) => {
-        if (active) {
-          setEvents(events);
-          setEventsError('');
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setEventsError('Unable to load monitoring events.');
-        }
-      });
+    eventsActive.current = true;
+    void refreshEventData();
 
     return () => {
-      active = false;
+      eventsActive.current = false;
+      eventsRequestId.current++;
     };
   }, [attempt]);
 
@@ -242,20 +249,7 @@ export function DeviceListPage() {
     }
 
     async function refreshEvents() {
-      try {
-        const result = await listEvents();
-
-        if (active) {
-          setEvents(result.events);
-          setEventsError('');
-        }
-      } catch {
-        if (active) {
-          setEventsError(
-            'Unable to refresh monitoring events. Displayed data may be outdated.',
-          );
-        }
-      }
+      if (active) await refreshEventData();
     }
 
     source.addEventListener('devices-changed', () => {
@@ -278,6 +272,8 @@ export function DeviceListPage() {
 
     source.addEventListener('access-ended', () => {
       active = false;
+      eventsActive.current = false;
+      eventsRequestId.current++;
       source.close();
       setRefreshError('Your monitoring access ended. Sign in again.');
       setDevices([]);
@@ -317,9 +313,7 @@ export function DeviceListPage() {
         });
       }
 
-      const result = await listEvents();
-      setEvents(result.events);
-      setEventsError('');
+      await refreshEventData();
 
       setAssignmentResponderIds((current) => {
         const next = { ...current };
@@ -342,8 +336,7 @@ export function DeviceListPage() {
       );
 
       try {
-        const result = await listEvents();
-        setEvents(result.events);
+        await refreshEventData();
       } catch {
         setEventsError(
           'Unable to refresh events. Displayed data may be outdated.',
@@ -376,9 +369,7 @@ export function DeviceListPage() {
     } finally {
       // Fetch after success or conflict; do not depend solely on SSE.
       try {
-        const result = await listEvents();
-        setEvents(result.events);
-        setEventsError('');
+        await refreshEventData();
       } catch {
         setEventsError(
           'Unable to refresh events. Displayed data may be outdated.',

@@ -4,6 +4,7 @@ import { env } from '../config.js';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
 import { subscribeToDeviceChanges, subscribeToEventChanges } from './monitoring-events.js';
+import { onMonitoringShutdown } from './monitoring-events.js';
 
 export const monitoringRouter = Router();
 
@@ -27,6 +28,7 @@ monitoringRouter.get(
     let timer: ReturnType<typeof setTimeout> | undefined;
     let unsubscribe = () => {};
     let unsubscribeEvents = () => {};
+    let unsubscribeShutdown = () => {};
 
     function cleanup() {
       if (closed) return;
@@ -35,6 +37,7 @@ monitoringRouter.get(
       if (timer) clearTimeout(timer);
       unsubscribe();
       unsubscribeEvents();
+      unsubscribeShutdown();
     }
 
     function closeConnection() {
@@ -92,6 +95,7 @@ monitoringRouter.get(
     }
 
     response.on('close', cleanup);
+    unsubscribeShutdown = onMonitoringShutdown(closeConnection);
 
     unsubscribe = subscribeToDeviceChanges(() => {
       write('event: devices-changed\ndata: {}\n\n');

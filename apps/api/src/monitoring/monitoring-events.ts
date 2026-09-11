@@ -1,6 +1,16 @@
 import { EventEmitter } from 'node:events';
 
 const emitter = new EventEmitter();
+const shutdownListeners = new Set<() => void>();
+
+export function onMonitoringShutdown(listener: () => void) {
+  shutdownListeners.add(listener);
+  return () => { shutdownListeners.delete(listener); };
+}
+
+export function closeMonitoringStreams() {
+  for (const listener of [...shutdownListeners]) listener();
+}
 
 export function notifyDevicesChanged() {
   emitter.emit('devices-changed');

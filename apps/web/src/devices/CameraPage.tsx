@@ -221,7 +221,11 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
   }
 
   useEffect(() => {
+    // Defer one task so StrictMode's setup/cleanup probe cannot start
+    // a second permission request. Manual Stop does not restart this effect.
+    const startup = window.setTimeout(() => void start(), 0);
     return () => {
+      window.clearTimeout(startup);
       const run = runRef.current;
       runRef.current = null;
 

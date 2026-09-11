@@ -26,6 +26,8 @@ export function App() {
     const [signingOut, setSigningOut] = useState(false);
     const [attempt, setAttempt] = useState(0);
     const [adminLocked, setAdminLocked] = useState(() => sessionStorage.getItem(ADMIN_LOCK_STORAGE_KEY) ==='true',);
+    const [contentUnlocked, setContentUnlocked] = useState(() =>
+      sessionStorage.getItem(ADMIN_LOCK_STORAGE_KEY) !== 'true');
 
   useEffect(() => {
     let active = true;
@@ -74,6 +76,7 @@ export function App() {
   }
 
   function handleUnlock() {
+    setContentUnlocked(true);
     sessionStorage.removeItem(ADMIN_LOCK_STORAGE_KEY);
     setAdminLocked(false);
   }
@@ -87,12 +90,14 @@ export function App() {
       sessionStorage.removeItem(ADMIN_LOCK_STORAGE_KEY);
       setAdminLocked(false);
       setUser(null);
+      setContentUnlocked(true);
       navigate('/', { replace: true});
     } catch (error: unknown) {
       if (error instanceof ApiError && error.status === 401) {
         sessionStorage.removeItem(ADMIN_LOCK_STORAGE_KEY);
         setAdminLocked(false);
         setUser(null);
+        setContentUnlocked(true);
         navigate('/', { replace: true});
       } else {
         setError('Sign-out failed. Please try again.');
@@ -121,19 +126,19 @@ export function App() {
     return <LoginPage onLogin={setUser} />;
   }
 
-  if (user.role === 'ADMIN' && adminLocked) {
-    return (
+  const locked = user.role === 'ADMIN' && adminLocked;
+
+  return (
+    <>
+      {locked && (
       <AdminLockScreen
         adminName={user.name}
         signingOut={signingOut}
         onUnlock={handleUnlock}
         onSignOut={() => void handleLogout()}
       />
-    );
-  }
-
-  return (
-    <main>
+      )}
+    <main hidden={locked} inert={locked} aria-hidden={locked}>
         <header>
         <p>
             {user.name} · {user.role}
@@ -164,7 +169,7 @@ export function App() {
         {error && <p role="alert">{error}</p>}
         </header>
 
-        <Routes>
+        {(contentUnlocked || user.role !== 'ADMIN') && <Routes>
           <Route
             path="/"
             element={
@@ -246,7 +251,8 @@ export function App() {
               </RequireRole>
             }
           />
-        </Routes>
+        </Routes>}
     </main>
+    </>
     );
 }

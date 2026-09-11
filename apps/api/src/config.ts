@@ -5,6 +5,7 @@ import { z } from 'zod';
 config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)), quiet: true });
 const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  APP_ORIGIN: z.string().url().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(32),

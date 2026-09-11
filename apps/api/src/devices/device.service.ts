@@ -117,6 +117,8 @@ export async function listDevices() {
        created_at,
        CASE
          WHEN publishing_session_id IS NOT NULL
+          AND publishing_lease_expires_at > NOW()
+          AND (publishing_started_at IS NULL OR last_seen_at >= publishing_started_at)
           AND last_seen_at > NOW() - ($1::integer * INTERVAL '1 second')
          THEN 'ONLINE'
          ELSE 'OFFLINE'
@@ -142,6 +144,8 @@ export async function getDeviceById(deviceId: string) {
        created_at,
        CASE
          WHEN publishing_session_id IS NOT NULL
+          AND publishing_lease_expires_at > NOW()
+          AND (publishing_started_at IS NULL OR last_seen_at >= publishing_started_at)
           AND last_seen_at > NOW() - ($2::integer * INTERVAL '1 second')
          THEN 'ONLINE'
          ELSE 'OFFLINE'

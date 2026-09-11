@@ -9,10 +9,14 @@ import { deviceGroupRouter } from './device-groups/device-group.routes.js';
 import { responderRouter } from './responders/responder.routes.js';
 import { auditRouter } from './audit/audit.routes.js';
 import cookieParser from 'cookie-parser';
+import { validateMutationOrigin, loginAttemptLimiter } from './auth/request-protection.js';
 
 export function createApp(checkDatabase: () => Promise<void>, webRoot?: string) {
   const app = express();
   app.disable('x-powered-by');
+  app.use('/api', validateMutationOrigin);
+  const limitAuth = loginAttemptLimiter();
+  app.use(['/api/auth/login', '/api/auth/reauthenticate'], limitAuth);
 
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
@@ -41,6 +45,12 @@ export function createApp(checkDatabase: () => Promise<void>, webRoot?: string) 
   }
   const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
     const badJson = error instanceof SyntaxError && 'body' in error;
+    if (error && error.type === 'entity.too.large') {
+      response.status(413).json({
+        error: { code: 'PAYLOAD_TOO_LARGE', message: 'Request body exceeds the size limit.' },
+      });
+      return;
+    }
     response.status(badJson ? 400 : 500).json({
       error: { code: badJson ? 'INVALID_JSON' : 'INTERNAL_ERROR', message: badJson ? 'Invalid JSON body.' : 'Request failed.' },
     });

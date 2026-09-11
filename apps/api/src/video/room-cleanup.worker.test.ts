@@ -19,6 +19,9 @@ vi.mock('../devices/publishing.service.js', () => ({
 }));
 
 import { startRoomCleanupWorker } from './room-cleanup.worker.js';
+vi.mock('./responder-revocation.service.js', () => ({
+  processResponderRevocations: vi.fn(async () => {}),
+}));
 
 beforeEach(() => {
   vi.useFakeTimers();

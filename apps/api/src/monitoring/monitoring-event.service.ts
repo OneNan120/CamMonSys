@@ -69,14 +69,18 @@ export async function createMonitoringEvent(
   type: MonitoringEventType,
 ) {
   const result = await pool.query<MonitoringEventRow>(
-    `INSERT INTO events (device_id, type)
+    `WITH eligible_device AS MATERIALIZED (
+       SELECT id FROM devices
+       WHERE id = $1
+         AND publishing_session_id = $2
+         AND publishing_owner_session_id = $3
+         AND publishing_lease_expires_at > clock_timestamp()
+         AND deleted_at IS NULL
+       FOR UPDATE
+     )
+     INSERT INTO events (device_id, type)
      SELECT id, $4
-     FROM devices
-     WHERE id = $1
-       AND publishing_session_id = $2
-       AND publishing_owner_session_id = $3
-       AND publishing_lease_expires_at > clock_timestamp()
-       AND deleted_at IS NULL
+     FROM eligible_device
      RETURNING id, device_id, type, status, created_at, assigned_to_id`,
     [
       deviceId,
