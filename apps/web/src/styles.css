@@ -1534,7 +1534,7 @@ button + button { margin-left: 7px; }
   margin-left:auto
 }
 .camera-lifecycle-note {
-  max-width:900px;
+  max-width:1500px;
   color:var(--muted)
 }
 input[type="search"]::-webkit-search-cancel-button {
