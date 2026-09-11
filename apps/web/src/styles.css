@@ -1590,3 +1590,80 @@ input[type="search"]::-webkit-search-cancel-button {
   }
 }
 
+
+.snapshot-panel {
+  display: block;
+  min-height: 0;
+  text-align: left;
+  place-content: initial;
+  overflow: hidden;
+}
+
+.device-detail-page > .snapshot-panel {
+  margin-top: 20px;
+}
+
+.snapshot-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.snapshot-heading h3 {
+  margin: 3px 0 0;
+}
+
+.snapshot-heading time {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.snapshot-image-frame {
+  position: relative;
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #050b12;
+}
+
+.snapshot-image-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 520px;
+  object-fit: contain;
+}
+
+.snapshot-image-frame p {
+  margin: 0;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.snapshot-panel--empty {
+  display: grid;
+  min-height: 220px;
+  place-content: center;
+  text-align: center;
+}
+
+.snapshot-panel--empty > span {
+  font-size: 3rem;
+  color: var(--muted);
+}
+
+@media (max-width: 600px) {
+  .snapshot-heading {
+    flex-direction: column;
+  }
+
+  .snapshot-image-frame {
+    min-height: 120px;
+  }
+}

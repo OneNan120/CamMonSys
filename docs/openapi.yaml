@@ -390,6 +390,18 @@ paths:
               properties:
                 publishingSessionId: { type: string, format: uuid }
                 type: { $ref: '#/components/schemas/EventType' }
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publishingSessionId, type]
+              properties:
+                publishingSessionId: { type: string, format: uuid }
+                type: { $ref: '#/components/schemas/EventType' }
+                snapshot:
+                  type: string
+                  format: binary
+                  description: Optional JPEG snapshot, at most 2 MiB.
       responses:
         '201':
           description: Event persisted.
@@ -404,6 +416,11 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: Snapshot exceeds the 2 MiB limit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
         '409':
           description: Publication is inactive.
           content:
@@ -520,6 +537,31 @@ paths:
         '400': { $ref: '#/components/responses/InvalidInput' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/events/{eventId}/snapshot:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    get:
+      tags: [Events]
+      summary: Get an event snapshot
+      description: Returns the JPEG snapshot to Admin/Monitor, or to the assigned Responder while the event is unresolved.
+      responses:
+        '200':
+          description: Snapshot image.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: 'private, no-store' }
+            X-Content-Type-Options:
+              schema: { type: string, const: nosniff }
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Event, accessible assignment, or snapshot not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
   /api/events/{eventId}/status:
     parameters:
       - { $ref: '#/components/parameters/EventId' }
@@ -875,7 +917,7 @@ components:
     CreatedEvent:
       type: object
       additionalProperties: false
-      required: [id, device_id, type, status, created_at, assigned_to_id]
+      required: [id, device_id, type, status, created_at, assigned_to_id, snapshot_available, snapshot_captured_at]
       properties:
         id: { type: string, format: uuid }
         device_id: { type: string, format: uuid }
@@ -883,10 +925,12 @@ components:
         status: { $ref: '#/components/schemas/EventStatus' }
         created_at: { type: string, format: date-time }
         assigned_to_id: { $ref: '#/components/schemas/NullableUuid' }
+        snapshot_available: { type: boolean }
+        snapshot_captured_at: { $ref: '#/components/schemas/NullableDateTime' }
     MonitoringEvent:
       type: object
       additionalProperties: false
-      required: [id, device_id, device_name, device_location, type, status, created_at, assigned_to_id, assigned_to_name, assigned_by_name, instructions, completion_note, acknowledged_at, acknowledged_by_name, resolved_at, resolved_by_name]
+      required: [id, device_id, device_name, device_location, type, status, created_at, assigned_to_id, assigned_to_name, assigned_by_name, instructions, completion_note, snapshot_available, snapshot_captured_at, acknowledged_at, acknowledged_by_name, resolved_at, resolved_by_name]
       properties:
         id: { type: string, format: uuid }
         device_id: { type: string, format: uuid }
@@ -900,6 +944,8 @@ components:
         assigned_by_name: { $ref: '#/components/schemas/NullableString' }
         instructions: { $ref: '#/components/schemas/NullableString' }
         completion_note: { $ref: '#/components/schemas/NullableString' }
+        snapshot_available: { type: boolean }
+        snapshot_captured_at: { $ref: '#/components/schemas/NullableDateTime' }
         acknowledged_at: { $ref: '#/components/schemas/NullableDateTime' }
         acknowledged_by_name: { $ref: '#/components/schemas/NullableString' }
         resolved_at: { $ref: '#/components/schemas/NullableDateTime' }

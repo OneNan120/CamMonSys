@@ -69,6 +69,7 @@ docker compose exec -T db psql -U cammon -d cammon < apps/api/sql/003_publishing
 docker compose exec -T db psql -U cammon -d cammon < apps/api/sql/004_camera_room_cleanup.sql
 docker compose exec -T db psql -U cammon -d cammon -v ON_ERROR_STOP=1 < apps/api/sql/005_publication_readiness.sql
 docker compose exec -T db psql -U cammon -d cammon -v ON_ERROR_STOP=1 < apps/api/sql/006_responder_revocation.sql
+docker compose exec -T db psql -U cammon -d cammon -v ON_ERROR_STOP=1 < apps/api/sql/007_event_snapshots.sql
 ```
 
 Create and initialize the isolated test database:
@@ -81,6 +82,7 @@ docker compose exec -T db psql -U cammon -d cammon_test < apps/api/sql/003_publi
 docker compose exec -T db psql -U cammon -d cammon_test < apps/api/sql/004_camera_room_cleanup.sql
 docker compose exec -T db psql -U cammon -d cammon_test -v ON_ERROR_STOP=1 < apps/api/sql/005_publication_readiness.sql
 docker compose exec -T db psql -U cammon -d cammon_test -v ON_ERROR_STOP=1 < apps/api/sql/006_responder_revocation.sql
+docker compose exec -T db psql -U cammon -d cammon_test -v ON_ERROR_STOP=1 < apps/api/sql/007_event_snapshots.sql
 ```
 
 `createdb` reports an error if `cammon_test` already exists; in that case, continue with the SQL commands. Replace `cammon` in these commands if `.env` uses different database names or credentials.
@@ -259,7 +261,7 @@ The publishing lease must be at least three times the heartbeat interval.
 
 ## Assessment status
 
-The functional assessment requirements are implemented: role-based authentication and refresh persistence, device registration, automatic camera-page startup, Online/Offline and Last Seen tracking, live device/event refreshes, persisted simulated alerts, camera detail viewing, and the OPEN → ACKNOWLEDGED → RESOLVED workflow. Bonus work includes the Responder role, LiveKit video, groups/search/filtering, audit history, and API tests.
+The functional assessment requirements are implemented: role-based authentication and refresh persistence, device registration, automatic camera-page startup, Online/Offline and Last Seen tracking, live device/event refreshes, persisted simulated alerts with captured snapshots, camera detail viewing, and the OPEN → ACKNOWLEDGED → RESOLVED workflow. Bonus work includes the Responder role, LiveKit video, groups/search/filtering, audit history, and API tests.
 
 Responsive visual acceptance against the supplied Figma design and public deployment are the remaining submission phases. See [docs/plan.md](docs/plan.md) for the requirement-by-requirement audit and acceptance checklist.
 

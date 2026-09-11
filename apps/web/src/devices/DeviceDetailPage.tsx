@@ -21,6 +21,7 @@ import {
   type MonitoringEvent,
 } from './event-api';
 import { EventCard } from '../events/EventCard';
+import { EventSnapshot } from '../events/EventSnapshot';
 import { useMonitoringStream } from '../monitoring/MonitoringStreamContext';
 import {
   listResponders,
@@ -398,6 +399,14 @@ export function DeviceDetailPage({
               )}
             </footer>
           </section>
+
+          {events.find((event) => event.snapshot_available) && (
+            <EventSnapshot
+              event={events.find((event) => event.snapshot_available)!}
+              linkToEvent
+              heading="Latest snapshot"
+            />
+          )}
 
           <section
             className="device-management-panel"

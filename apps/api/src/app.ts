@@ -1,4 +1,5 @@
 import express, { type ErrorRequestHandler } from 'express';
+import multer from 'multer';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { authRouter } from './auth/auth.routes.js';
@@ -47,9 +48,18 @@ export function createApp(checkDatabase: () => Promise<void>, webRoot?: string) 
   }
   const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
     const badJson = error instanceof SyntaxError && 'body' in error;
-    if (error && error.type === 'entity.too.large') {
+    if (
+      (error && error.type === 'entity.too.large')
+      || (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE')
+    ) {
       response.status(413).json({
         error: { code: 'PAYLOAD_TOO_LARGE', message: 'Request body exceeds the size limit.' },
+      });
+      return;
+    }
+    if (error instanceof multer.MulterError) {
+      response.status(400).json({
+        error: { code: 'INVALID_SNAPSHOT', message: 'Provide one JPEG snapshot.' },
       });
       return;
     }

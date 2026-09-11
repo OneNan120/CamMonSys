@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { pool } from '../db.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -32,6 +33,59 @@ const createEventSchema = z.object({
   publishingSessionId: z.string().uuid(),
   type: z.enum(['TEST_ALERT', 'MOTION', 'BED_EXIT']),
 });
+
+const snapshotUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 1, fileSize: 2 * 1024 * 1024, fields: 4 },
+  fileFilter: (_request, file, callback) => {
+    if (file.mimetype !== 'image/jpeg') {
+      callback(new multer.MulterError('LIMIT_UNEXPECTED_FILE', file.fieldname));
+      return;
+    }
+    callback(null, true);
+  },
+});
+
+function isJpeg(buffer: Buffer): boolean {
+  if (
+    buffer.length < 16
+    || buffer[0] !== 0xff
+    || buffer[1] !== 0xd8
+    || buffer[buffer.length - 2] !== 0xff
+    || buffer[buffer.length - 1] !== 0xd9
+  ) {
+    return false;
+  }
+
+  let offset = 2;
+  let hasFrame = false;
+
+  while (offset + 3 < buffer.length) {
+    if (buffer[offset] !== 0xff) return false;
+
+    const marker = buffer[offset + 1]!;
+    offset += 2;
+
+    if (marker === 0xda) return hasFrame;
+    if (marker === 0xd9) return false;
+    if (marker === 0x00 || marker === 0xff) continue;
+
+    const length = buffer.readUInt16BE(offset);
+    if (length < 2 || offset + length > buffer.length) return false;
+
+    if (
+      marker >= 0xc0
+      && marker <= 0xcf
+      && ![0xc4, 0xc8, 0xcc].includes(marker)
+    ) {
+      hasFrame = true;
+    }
+
+    offset += length;
+  }
+
+  return false;
+}
 
 const assignDeviceGroupSchema = z.object({
   groupId: z.string().uuid().nullable(),
@@ -93,6 +147,7 @@ deviceRouter.post(
   '/:deviceId/events',
   requireAuth,
   requireRole('ADMIN'),
+  snapshotUpload.single('snapshot'),
   async (request, response) => {
     const deviceId = deviceIdSchema.safeParse(request.params.deviceId);
     const body = createEventSchema.safeParse(request.body);
@@ -119,11 +174,29 @@ deviceRouter.post(
       return;
     }
 
+    if (request.file && !isJpeg(request.file.buffer)) {
+      response.status(400).json({
+        error: {
+          code: 'INVALID_SNAPSHOT',
+          message: 'Snapshot must be a valid JPEG image.',
+        },
+      });
+      return;
+    }
+
     const event = await createMonitoringEvent(
       deviceId.data,
       body.data.publishingSessionId,
       response.locals.sessionId,
       body.data.type,
+      request.file
+        ? {
+            data: request.file.buffer,
+            mimeType: 'image/jpeg',
+            sizeBytes: request.file.size,
+            capturedAt: new Date(),
+          }
+        : undefined,
     );
 
     if (!event) {

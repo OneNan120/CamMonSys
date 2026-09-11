@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { pool } from '../db.js';
 import { updateMonitoringEventStatus, responderHasActiveDeviceAssignment } from './monitoring-event.service.js';
+import { subscribeToEventChanges } from './monitoring-events.js';
 import request from 'supertest';
 import { createApp } from '../app.js';
 import { hashPassword } from '../auth/password.js';
@@ -1103,4 +1104,202 @@ it('prevents an assigned Responder from skipping directly to Resolved', async ()
   expect(response.body.error.code).toBe(
     'EVENT_STATUS_CONFLICT',
   );
+});
+
+const onePixelJpeg = Buffer.from(
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EB//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EB//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EB//2Q==',
+  'base64',
+);
+
+it('stores a JPEG atomically with an alert and serves it only to authorized users', async () => {
+  const admin = request.agent(app);
+  await admin.post('/api/auth/login').send({
+    email: `event-admin-${adminId}@example.com`,
+    password,
+  }).expect(200);
+
+  const session = await pool.query<{ id: string }>(
+    `SELECT id FROM auth_sessions
+     WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+     ORDER BY created_at DESC LIMIT 1`,
+    [adminId],
+  );
+  const ownerSessionId = session.rows[0]?.id;
+  if (!ownerSessionId) throw new Error('Expected an active Admin session.');
+
+  const publishingSessionId = randomUUID();
+  await pool.query(
+    `UPDATE devices
+     SET publishing_session_id = $2,
+         publishing_owner_session_id = $3,
+         publishing_lease_expires_at = NOW() + INTERVAL '1 hour',
+         last_seen_at = NOW()
+     WHERE id = $1`,
+    [deviceId, publishingSessionId, ownerSessionId],
+  );
+
+  let invalidations = 0;
+  const unsubscribe = subscribeToEventChanges(() => { invalidations += 1; });
+  const created = await admin
+    .post(`/api/devices/${deviceId}/events`)
+    .field('publishingSessionId', publishingSessionId)
+    .field('type', 'TEST_ALERT')
+    .attach('snapshot', onePixelJpeg, {
+      filename: 'snapshot.jpg',
+      contentType: 'image/jpeg',
+    })
+    .expect(201);
+  unsubscribe();
+
+  expect(invalidations).toBe(1);
+  expect(created.body.event).toMatchObject({
+    snapshot_available: true,
+  });
+  expect(created.body.event.snapshot_captured_at).toBeTruthy();
+
+  const eventIdWithSnapshot = created.body.event.id;
+  const stored = await pool.query(
+    `SELECT snapshot_data, snapshot_mime_type, snapshot_size_bytes,
+            snapshot_captured_at
+     FROM events WHERE id = $1`,
+    [eventIdWithSnapshot],
+  );
+  expect(stored.rows[0].snapshot_data).toEqual(onePixelJpeg);
+  expect(stored.rows[0]).toMatchObject({
+    snapshot_mime_type: 'image/jpeg',
+    snapshot_size_bytes: onePixelJpeg.length,
+  });
+  expect(stored.rows[0].snapshot_captured_at).toBeInstanceOf(Date);
+
+  const detail = await admin.get(`/api/events/${eventIdWithSnapshot}`).expect(200);
+  expect(detail.body.event.snapshot_available).toBe(true);
+  expect(detail.body.event.snapshot_data).toBeUndefined();
+
+  const image = await admin
+    .get(`/api/events/${eventIdWithSnapshot}/snapshot`)
+    .buffer(true)
+    .parse((response, callback) => {
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      response.on('end', () => callback(null, Buffer.concat(chunks)));
+    })
+    .expect('Content-Type', /image\/jpeg/)
+    .expect('X-Content-Type-Options', 'nosniff')
+    .expect(200);
+  expect(image.body).toEqual(onePixelJpeg);
+
+  const monitor = request.agent(app);
+  await monitor.post('/api/auth/login').send({
+    email: `event-monitor-${monitorId}@example.com`,
+    password,
+  }).expect(200);
+  await monitor.get(`/api/events/${eventIdWithSnapshot}/snapshot`).expect(200);
+
+  const responder = request.agent(app);
+  await responder.post('/api/auth/login').send({
+    email: `event-responder-${responderId}@example.com`,
+    password,
+  }).expect(200);
+  await responder.get(`/api/events/${eventIdWithSnapshot}/snapshot`).expect(404);
+
+  await pool.query(
+    `UPDATE events SET assigned_to_id = $2, assigned_by_id = $3,
+       instructions = 'Review the snapshot.'
+     WHERE id = $1`,
+    [eventIdWithSnapshot, responderId, adminId],
+  );
+  await responder.get(`/api/events/${eventIdWithSnapshot}/snapshot`).expect(200);
+
+  await pool.query(
+    `UPDATE events SET status = 'RESOLVED' WHERE id = $1`,
+    [eventIdWithSnapshot],
+  );
+  await responder.get(`/api/events/${eventIdWithSnapshot}/snapshot`).expect(404);
+  await request(app).get(`/api/events/${eventIdWithSnapshot}/snapshot`).expect(401);
+});
+
+it('creates alerts without snapshots and rejects invalid snapshot uploads without partial events', async () => {
+  const admin = request.agent(app);
+  await admin.post('/api/auth/login').send({
+    email: `event-admin-${adminId}@example.com`,
+    password,
+  }).expect(200);
+
+  const session = await pool.query<{ id: string }>(
+    `SELECT id FROM auth_sessions
+     WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+     ORDER BY created_at DESC LIMIT 1`,
+    [adminId],
+  );
+  const ownerSessionId = session.rows[0]?.id;
+  if (!ownerSessionId) throw new Error('Expected an active Admin session.');
+
+  const publishingSessionId = randomUUID();
+  await pool.query(
+    `UPDATE devices
+     SET publishing_session_id = $2,
+         publishing_owner_session_id = $3,
+         publishing_lease_expires_at = NOW() + INTERVAL '1 hour'
+     WHERE id = $1`,
+    [deviceId, publishingSessionId, ownerSessionId],
+  );
+
+  const withoutSnapshot = await admin
+    .post(`/api/devices/${deviceId}/events`)
+    .send({ publishingSessionId, type: 'TEST_ALERT' })
+    .expect(201);
+  expect(withoutSnapshot.body.event.snapshot_available).toBe(false);
+  expect(withoutSnapshot.body.event.snapshot_captured_at).toBeNull();
+  await admin
+    .get(`/api/events/${withoutSnapshot.body.event.id}/snapshot`)
+    .expect(404);
+  await admin.get('/api/events/not-a-uuid/snapshot').expect(400);
+  await admin.get(`/api/events/${randomUUID()}/snapshot`).expect(404);
+
+  const before = await pool.query<{ count: string }>(
+    'SELECT COUNT(*)::text AS count FROM events WHERE device_id = $1',
+    [deviceId],
+  );
+
+  let invalidations = 0;
+  const unsubscribe = subscribeToEventChanges(() => { invalidations += 1; });
+
+  await admin
+    .post(`/api/devices/${deviceId}/events`)
+    .field('publishingSessionId', publishingSessionId)
+    .field('type', 'TEST_ALERT')
+    .attach('snapshot', Buffer.from('not a jpeg'), {
+      filename: 'snapshot.jpg',
+      contentType: 'image/jpeg',
+    })
+    .expect(400);
+
+  await admin
+    .post(`/api/devices/${deviceId}/events`)
+    .field('publishingSessionId', publishingSessionId)
+    .field('type', 'TEST_ALERT')
+    .attach('snapshot', Buffer.from('plain text'), {
+      filename: 'snapshot.txt',
+      contentType: 'text/plain',
+    })
+    .expect(400);
+
+  await admin
+    .post(`/api/devices/${deviceId}/events`)
+    .field('publishingSessionId', publishingSessionId)
+    .field('type', 'TEST_ALERT')
+    .attach('snapshot', Buffer.alloc(2 * 1024 * 1024 + 1, 0xff), {
+      filename: 'large.jpg',
+      contentType: 'image/jpeg',
+    })
+    .expect(413);
+
+  unsubscribe();
+  expect(invalidations).toBe(0);
+
+  const after = await pool.query<{ count: string }>(
+    'SELECT COUNT(*)::text AS count FROM events WHERE device_id = $1',
+    [deviceId],
+  );
+  expect(after.rows[0].count).toBe(before.rows[0].count);
 });

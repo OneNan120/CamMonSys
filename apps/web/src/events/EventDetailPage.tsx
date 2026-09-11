@@ -14,6 +14,7 @@ import {
   type ResponderSummary,
 } from '../responders/responder-api';
 import { EventAssignmentEditor } from './EventAssignmentEditor';
+import { EventSnapshot } from './EventSnapshot';
 
 export function EventDetailPage({
   canAssign,
@@ -331,21 +332,7 @@ export function EventDetailPage({
             )}
           </section>
 
-          <section className="snapshot-panel">
-            <span aria-hidden="true">
-              ▧
-            </span>
-
-            <h3>
-              No snapshot captured
-            </h3>
-
-            <p>
-              Snapshot capture and secure
-              storage are planned as a later
-              enhancement.
-            </p>
-          </section>
+          <EventSnapshot event={event} />
         </aside>
       </div>
 

@@ -70,15 +70,24 @@ export function getViewingConnection(deviceId: string) {
 export function createTestAlert(
   deviceId: string,
   publishingSessionId: string,
+  snapshot?: Blob,
 ) {
   return apiRequest<{ event: MonitoringEvent }>(
     `${devicePath(deviceId)}/events`,
     {
       method: 'POST',
-      body: JSON.stringify({
-        publishingSessionId,
-        type: 'TEST_ALERT',
-      }),
+      body: snapshot
+        ? (() => {
+            const form = new FormData();
+            form.set('publishingSessionId', publishingSessionId);
+            form.set('type', 'TEST_ALERT');
+            form.set('snapshot', snapshot, 'snapshot.jpg');
+            return form;
+          })()
+        : JSON.stringify({
+            publishingSessionId,
+            type: 'TEST_ALERT',
+          }),
     },
   );
 }

@@ -17,6 +17,8 @@ export type MonitoringEvent = {
     assigned_by_name: string | null;
     instructions: string | null;
     completion_note: string | null;
+    snapshot_available: boolean;
+    snapshot_captured_at: string | null;
 };
 
 export function listEvents(deviceId?: string) {
@@ -80,4 +82,8 @@ export function listMyAssignments() {
 }
 export function getEvent(eventId: string) {
   return apiRequest<{ event: MonitoringEvent }>(`/api/events/${encodeURIComponent(eventId)}`);
+}
+
+export function eventSnapshotUrl(eventId: string) {
+  return `/api/events/${encodeURIComponent(eventId)}/snapshot`;
 }

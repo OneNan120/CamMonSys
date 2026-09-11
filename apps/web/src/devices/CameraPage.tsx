@@ -198,6 +198,58 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
     }
   }
 
+  async function captureSnapshot(): Promise<Blob> {
+    const video = videoRef.current;
+
+    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      throw new Error('Camera preview is not ready.');
+    }
+
+    const sourceWidth = video.videoWidth;
+    const sourceHeight = video.videoHeight;
+
+    if (!sourceWidth || !sourceHeight) {
+      throw new Error('Camera frame dimensions are unavailable.');
+    }
+
+    const scale = Math.min(1, 1280 / sourceWidth, 720 / sourceHeight);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Snapshot capture is unavailable.');
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const snapshot = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, 'image/jpeg', 0.82);
+    });
+
+    if (!snapshot || snapshot.size === 0) {
+      throw new Error('Camera returned an empty snapshot.');
+    }
+
+    if (snapshot.size > 2 * 1024 * 1024) {
+      throw new Error('Captured snapshot is too large.');
+    }
+
+    return snapshot;
+  }
+
+  async function captureSnapshotWithRetry(): Promise<Blob | undefined> {
+    try {
+      return await captureSnapshot();
+    } catch {
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+      try {
+        return await captureSnapshot();
+      } catch {
+        return undefined;
+      }
+    }
+  }
+
   async function handleTestAlert() {
     const run = runRef.current;
 
@@ -207,8 +259,19 @@ export function CameraPage({ deviceId }: { deviceId: string }) {
     setEventMessage('');
 
     try {
-      await createTestAlert(deviceId, run.publishingSessionId);
-      setEventMessage('Test Alert created.');
+      const snapshot = await captureSnapshotWithRetry();
+
+      await createTestAlert(
+        deviceId,
+        run.publishingSessionId,
+        snapshot,
+      );
+
+      setEventMessage(
+        snapshot
+          ? 'Test Alert and snapshot created.'
+          : 'Test Alert created, but the snapshot was unavailable.',
+      );
     } catch (error: unknown) {
       setEventMessage(
         error instanceof Error

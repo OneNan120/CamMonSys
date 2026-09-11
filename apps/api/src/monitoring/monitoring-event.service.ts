@@ -62,11 +62,19 @@ export type UpdateResponderEventResult =
       status: 'STATUS_CONFLICT';
 };
 
+export type EventSnapshotInput = {
+  data: Buffer;
+  mimeType: 'image/jpeg';
+  sizeBytes: number;
+  capturedAt: Date;
+};
+
 export async function createMonitoringEvent(
   deviceId: string,
   publishingSessionId: string,
   ownerSessionId: string,
   type: MonitoringEventType,
+  snapshot?: EventSnapshotInput,
 ) {
   const result = await pool.query<MonitoringEventRow>(
     `WITH eligible_device AS MATERIALIZED (
@@ -78,15 +86,24 @@ export async function createMonitoringEvent(
          AND deleted_at IS NULL
        FOR UPDATE
      )
-     INSERT INTO events (device_id, type)
-     SELECT id, $4
+     INSERT INTO events (
+       device_id, type, snapshot_data, snapshot_mime_type,
+       snapshot_size_bytes, snapshot_captured_at
+     )
+     SELECT id, $4, $5, $6, $7, $8
      FROM eligible_device
-     RETURNING id, device_id, type, status, created_at, assigned_to_id`,
+     RETURNING id, device_id, type, status, created_at, assigned_to_id,
+       (snapshot_data IS NOT NULL) AS snapshot_available,
+       snapshot_captured_at`,
     [
       deviceId,
       publishingSessionId,
       ownerSessionId,
       type,
+      snapshot?.data ?? null,
+      snapshot?.mimeType ?? null,
+      snapshot?.sizeBytes ?? null,
+      snapshot?.capturedAt ?? null,
     ],
   );
 
@@ -108,6 +125,8 @@ export async function listMonitoringEvents(deviceId?: string) {
       assigned_by.name AS assigned_by_name,
       e.instructions,
       e.completion_note,
+      (e.snapshot_data IS NOT NULL) AS snapshot_available,
+      e.snapshot_captured_at,
       e.acknowledged_at,
       acknowledged_by.name AS acknowledged_by_name,
       e.resolved_at,
@@ -137,7 +156,9 @@ export async function getMonitoringEvent(eventId: string, responderId?: string) 
       d.location AS device_location, e.type, e.status, e.created_at,
       e.assigned_to_id, assigned_to.name AS assigned_to_name,
       assigned_by.name AS assigned_by_name, e.instructions,
-      e.completion_note, e.acknowledged_at,
+      e.completion_note,
+      (e.snapshot_data IS NOT NULL) AS snapshot_available,
+      e.snapshot_captured_at, e.acknowledged_at,
       acknowledged_by.name AS acknowledged_by_name, e.resolved_at,
       resolved_by.name AS resolved_by_name
     FROM events AS e
@@ -150,6 +171,30 @@ export async function getMonitoringEvent(eventId: string, responderId?: string) 
       AND ($2::uuid IS NULL OR (e.assigned_to_id = $2 AND e.status <> 'RESOLVED'))`,
     [eventId, responderId ?? null],
   );
+  return result.rows[0] ?? null;
+}
+
+export async function getMonitoringEventSnapshot(
+  eventId: string,
+  responderId?: string,
+) {
+  const result = await pool.query<{
+    data: Buffer;
+    mime_type: string;
+    size_bytes: number;
+    captured_at: Date;
+  }>(
+    `SELECT snapshot_data AS data,
+            snapshot_mime_type AS mime_type,
+            snapshot_size_bytes AS size_bytes,
+            snapshot_captured_at AS captured_at
+     FROM events
+     WHERE id = $1
+       AND snapshot_data IS NOT NULL
+       AND ($2::uuid IS NULL OR (assigned_to_id = $2 AND status <> 'RESOLVED'))`,
+    [eventId, responderId ?? null],
+  );
+
   return result.rows[0] ?? null;
 }
 
@@ -349,6 +394,8 @@ export async function listResponderAssignments(responderId: string) {
        assigned_by.name AS assigned_by_name,
        e.instructions,
        e.completion_note,
+       (e.snapshot_data IS NOT NULL) AS snapshot_available,
+       e.snapshot_captured_at,
        e.acknowledged_at,
        acknowledged_by.name AS acknowledged_by_name,
        e.resolved_at,

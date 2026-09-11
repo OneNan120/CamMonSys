@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../auth/require-auth.js';
 import { requireRole } from '../auth/require-role.js';
-import { listMonitoringEvents, getMonitoringEvent, monitoringEventExists, updateMonitoringEventStatus, assignMonitoringEvent, listResponderAssignments, responderHasOtherActiveDeviceAssignment, updateResponderEventStatus } from './monitoring-event.service.js';
+import { listMonitoringEvents, getMonitoringEvent, getMonitoringEventSnapshot, monitoringEventExists, updateMonitoringEventStatus, assignMonitoringEvent, listResponderAssignments, responderHasOtherActiveDeviceAssignment, updateResponderEventStatus } from './monitoring-event.service.js';
 import { notifyEventsChanged } from './monitoring-events.js';
 import { getActivePublishingSession } from '../devices/publishing.service.js';
 import { disconnectResponderFromCamera } from '../video/livekit.service.js';
@@ -127,6 +127,39 @@ eventRouter.get(
     response.json({ events });
   },
 );
+
+eventRouter.get('/:eventId/snapshot', requireAuth, async (request, response) => {
+  const eventId = eventIdSchema.safeParse(request.params.eventId);
+
+  if (!eventId.success) {
+    response.status(400).json({
+      error: { code: 'INVALID_INPUT', message: 'Provide a valid event ID.' },
+    });
+    return;
+  }
+
+  const user = response.locals.user;
+  const snapshot = await getMonitoringEventSnapshot(
+    eventId.data,
+    user.role === 'RESPONDER' ? user.id : undefined,
+  );
+
+  if (!snapshot) {
+    response.status(404).json({
+      error: { code: 'NOT_FOUND', message: 'Event snapshot not found.' },
+    });
+    return;
+  }
+
+  response
+    .set({
+      'Content-Type': snapshot.mime_type,
+      'Content-Length': String(snapshot.size_bytes),
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    })
+    .send(snapshot.data);
+});
 
 eventRouter.get('/:eventId', requireAuth, async (request, response) => {
   const eventId = eventIdSchema.safeParse(request.params.eventId);
