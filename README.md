@@ -128,8 +128,10 @@ npm run db:down
 - Assign, reassign, or unassign Responders.
 - Acknowledge and resolve events.
 - Soft-delete devices that have no unresolved events.
+- View all audit logs.
 - Search and filter the audit log.
 - Lock administrative controls and reauthenticate to unlock them.
+- Create users
 
 ### Monitor
 
@@ -138,6 +140,7 @@ npm run db:down
 - View monitoring events.
 - Assign, reassign, or unassign Responders.
 - Acknowledge and resolve events.
+- View own audit log.
 
 ### Responder
 
@@ -147,13 +150,14 @@ npm run db:down
 - View only cameras associated with active assignments.
 - Resolve an acknowledged assignment with an optional completion note.
 - Lose camera access when the last applicable assignment is reassigned, unassigned, or resolved.
+- View own audit log.
 
 ## Monitoring flow
 
 1. An Admin registers a device and starts its camera page.
 2. The browser requests camera permission and publishes video to a LiveKit room scoped to the current publishing session.
 3. Heartbeats renew the publishing lease and update Last Seen.
-4. The camera page creates Test Alerts; the API also accepts simulated motion and bed-exit types.
+4. The camera page creates Test Alerts; the API also accepts simulated motion and bed-exit types but no test button for them.
 5. PostgreSQL saves the event before the API emits an SSE invalidation signal.
 6. Admin and Monitor dashboards refetch authorized state without a full page reload.
 7. An Admin or Monitor may assign a Responder with instructions.
@@ -227,10 +231,6 @@ Build the production image:
 docker build -t cammon:local .
 ```
 
-The container expects runtime configuration through environment variables and must be able to reach PostgreSQL and LiveKit. A container's `localhost` refers to that container, not the host database.
-
-The repository provides a production application image but does not provision GKE, Cloud SQL, HTTPS ingress, or secret management. A GCP deployment should supply those separately and run the SQL migrations before starting application traffic.
-
 ## Project structure
 
 - `apps/web`: React application, role pages, camera publisher/viewer, and API clients
@@ -259,15 +259,9 @@ See `.env.example` for the complete list.
 The publishing lease must be at least three times the heartbeat interval.
 
 
-## Assessment status
+## Implementation Plan
 
-The functional assessment requirements are implemented: role-based authentication and refresh persistence, device registration, automatic camera preview with explicit publication controls, Online/Offline and Last Seen tracking, live device/event refreshes, persisted simulated alerts with captured snapshots, camera detail viewing, and the OPEN → ACKNOWLEDGED → RESOLVED workflow. Bonus work includes the Responder role, LiveKit video, groups/search/filtering, audit history, and API tests.
-
-Responsive visual acceptance against the supplied Figma design and public deployment are the remaining submission phases. See [docs/plan.md](docs/plan.md) for the requirement-by-requirement audit and acceptance checklist.
-
-## Current deployment status
-
-No public deployment or public demo accounts are included. Run the system locally or provide the documented runtime infrastructure and secrets for deployment.
+See [docs/plan.md](docs/plan.md) for the requirement-by-requirement audit.
 
 ## Local verification limits
 
