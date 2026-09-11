@@ -2,6 +2,107 @@
 
 CamMonSys is a role-based camera monitoring system built for a take-home technical assessment. It supports live camera publishing and viewing, device status monitoring, real-time event updates, event response workflows, device groups, audit history, and administrative controls.
 
+## Table of Contents
+
+- [Live Demo](#live-demo)
+- [Demo Accounts](#demo-accounts)
+  - [Admin](#admin)
+  - [Monitor](#monitor)
+  - [Responder](#responder)
+- [Architecture Overview](#architecture-overview)
+- [Features](#features)
+- [Technology](#technology)
+- [Key Design Decisions](#key-design-decisions)
+- [Prerequisites](#prerequisites)
+- [Environment Variables](#environment-variables)
+- [Initial Setup](#initial-setup)
+  - [Initialize the Databases](#initialize-the-databases)
+- [Development](#development)
+- [Validation and Verification](#validation-and-verification)
+- [Production Build](#production-build)
+- [Container Build](#container-build)
+- [Deployment](#deployment)
+- [Role Workflows](#role-workflows)
+  - [Admin](#admin-1)
+  - [Monitor](#monitor-1)
+  - [Responder](#responder-1)
+- [Monitoring Flow](#monitoring-flow)
+- [Event Lifecycle](#event-lifecycle)
+- [Camera Authorization](#camera-authorization)
+- [API Overview](#api-overview)
+- [Project Structure](#project-structure)
+- [Implementation Plan](#implementation-plan)
+- [Local Verification Limits](#local-verification-limits)
+
+## Live Demo
+
+Public application:
+
+https://cammon.onrender.com
+
+The production deployment uses:
+
+- Render Web Service
+- Render PostgreSQL
+- LiveKit Cloud
+
+The application is deployed over HTTPS and supports browser camera access, live video publishing/viewing, SSE-based dashboard updates, and role-based workflows.
+
+## Demo Accounts
+
+### Admin
+
+Email:
+
+```text
+admin@example.com
+```
+
+Password:
+
+```text
+Password123!
+```
+
+### Monitor
+
+Email:
+
+```text
+monitor@example.com
+```
+
+Password:
+
+```text
+Password123!
+```
+
+### Responder
+
+Email:
+
+```text
+responder@example.com
+```
+
+Password:
+
+```text
+Password123!
+```
+
+## Architecture Overview
+
+CamMonSys uses a React/Vite frontend served by an Express API in production.
+
+- React handles role-based UI, device monitoring, events, and camera controls.
+- Express provides authentication, authorization, device/event APIs, LiveKit token issuance, and SSE endpoints.
+- PostgreSQL stores users, sessions, devices, events, assignments, audit records, and cleanup queues.
+- LiveKit Cloud carries live camera video.
+- Server-Sent Events (SSE) notify connected clients that monitoring state changed; clients then refetch authorized REST data.
+- Camera publishers send heartbeats so the backend can derive Online/Offline status and Last Seen.
+
 ## Features
 
 - Cookie-based authentication backed by revocable server-side sessions.
@@ -26,6 +127,14 @@ CamMonSys is a role-based camera monitoring system built for a take-home technic
 - Vitest and Supertest for API and integration tests
 - Docker and Docker Compose for local infrastructure and production builds
 
+## Key Design Decisions
+
+- **SSE for monitoring updates:** monitoring changes are server-to-client invalidations, so SSE keeps the implementation simpler than a second WebSocket channel.
+- **LiveKit for video:** real-time media is delegated to a purpose-built WebRTC service rather than streamed through the application API.
+- **Revocable server-side sessions:** JWT cookies are backed by PostgreSQL auth sessions so logout and session revocation are enforceable.
+- **Soft device deletion:** devices can be removed from normal views while preserving related event and audit history.
+- **Transactional event updates:** event status changes and related audit records are written atomically to reduce inconsistent state.
+
 ## Prerequisites
 
 - WSL Ubuntu on Windows
@@ -36,7 +145,25 @@ CamMonSys is a role-based camera monitoring system built for a take-home technic
 
 Run all commands from the repository root inside WSL.
 
-## Initial setup
+## Environment Variables
+
+See `.env.example` for the complete list.
+
+- `DATABASE_URL`: development/production PostgreSQL connection
+- `TEST_DATABASE_URL`: isolated integration-test database
+- `JWT_SECRET`: authentication signing secret of at least 32 characters
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`: video service credentials
+- `AUTH_SESSION_DURATION_SECONDS`: login-session lifetime
+- `CAMERA_HEARTBEAT_INTERVAL_SECONDS`: publisher heartbeat frequency
+- `CAMERA_PUBLISHING_LEASE_SECONDS`: time before a silent publisher is considered inactive
+- `CAMERA_CLEANUP_INTERVAL_SECONDS`: stale LiveKit room cleanup interval
+- `SSE_KEEPALIVE_INTERVAL_SECONDS`: SSE session-validation and keepalive interval
+- `APP_ORIGIN`: exact public HTTPS origin for mutation-origin validation behind a proxy
+- `DEMO_*`: demo account names, emails, and passwords used by the seed command
+
+The publishing lease must be at least three times the heartbeat interval.
+
+## Initial Setup
 
 Install dependencies and create the local environment file:
 
@@ -58,7 +185,7 @@ npm run db:up
 
 The default Compose configuration exposes PostgreSQL on `127.0.0.1:5433`. If you change the database username, database name, or password, update the connection URLs in `.env` as well.
 
-### Initialize the databases
+### Initialize the Databases
 
 Compose creates the development database but does not automatically run the application SQL files. Apply them in numeric order:
 
@@ -118,7 +245,50 @@ npm run db:down
 
 `db:down` stops PostgreSQL without deleting its persistent volume.
 
-## Role workflows
+## Validation and Verification
+
+Run the complete verification sequence:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+The web workspace currently uses TypeScript validation and production builds; automated tests are in the API workspace. Integration tests require `TEST_DATABASE_URL` to point to a database different from `DATABASE_URL` and refuse to run against any database not named `cammon_test`.
+
+## Production Build
+
+After building, Express serves the React application, including frontend routes:
+
+```bash
+npm run build
+npm start
+```
+
+Open `http://localhost:3000`. Stop the development processes first so the API port is available.
+
+## Container Build
+
+Build the production image:
+
+```bash
+docker build -t cammon:local .
+```
+
+## Deployment
+
+The submitted demo is deployed using:
+
+- Render Web Service for the Dockerized React + Express application
+- Render PostgreSQL for the production database
+- LiveKit Cloud for live video transport
+
+Production uses HTTPS, `APP_ORIGIN` validation, secure authentication cookies, and the Render internal PostgreSQL connection.
+
+The application currently runs as a single API instance because the SSE emitter and authentication rate limiter are process-local.
+
+## Role Workflows
 
 ### Admin
 
@@ -131,7 +301,7 @@ npm run db:down
 - View all audit logs.
 - Search and filter the audit log.
 - Lock administrative controls and reauthenticate to unlock them.
-- Create users
+- Create users.
 
 ### Monitor
 
@@ -152,7 +322,7 @@ npm run db:down
 - Lose camera access when the last applicable assignment is reassigned, unassigned, or resolved.
 - View own audit log.
 
-## Monitoring flow
+## Monitoring Flow
 
 1. An Admin registers a device and starts its camera page.
 2. The browser requests camera permission and publishes video to a LiveKit room scoped to the current publishing session.
@@ -165,7 +335,7 @@ npm run db:down
 
 SSE messages contain no device or event records; they only notify clients to refetch. REST endpoints enforce role and assignment authorization.
 
-## Event lifecycle
+## Event Lifecycle
 
 Valid event transitions are:
 
@@ -175,7 +345,7 @@ OPEN -> ACKNOWLEDGED -> RESOLVED
 
 Transitions are atomic and reject stale or conflicting updates. Status changes and their audit entries are written together. Resolved events cannot be reassigned.
 
-## Camera authorization
+## Camera Authorization
 
 The API checks device access before issuing a short-lived LiveKit viewer token. Admin and Monitor users may view active devices. A Responder must have at least one unresolved assignment for the requested device.
 
@@ -185,9 +355,9 @@ Revocations are queued transactionally by a PostgreSQL trigger and retried by th
 
 Camera capture starts on page entry. Locking controls keeps the mounted publication running; a reload while locked waits for password unlock before mounting the camera again. Stop remains stopped until explicitly started again.
 
-Publication readiness uses publishing_started_at so a new reservation cannot reuse historical Last Seen to claim Online. Logout clears owned publications and queues remote room cleanup.
+Publication readiness uses `publishing_started_at` so a new reservation cannot reuse historical Last Seen to claim Online. Logout clears owned publications and queues remote room cleanup.
 
-## API overview
+## API Overview
 
 - `/api/auth`: login, current user, logout, and Admin reauthentication
 - `/api/devices`: registration, listing, detail, grouping, deletion, publishing, heartbeat, stop, events, and view tokens
@@ -200,38 +370,7 @@ Publication readiness uses publishing_started_at so a new reservation cannot reu
 
 The complete machine-readable contract, including authentication, role constraints, request schemas, response schemas, and error cases, is in [docs/openapi.yaml](docs/openapi.yaml).
 
-## Validation and verification
-
-Run the complete verification sequence:
-
-```bash
-npm run typecheck
-npm test
-npm run build
-```
-
-The web workspace currently uses TypeScript validation and production builds; automated tests are in the API workspace. Integration tests require `TEST_DATABASE_URL` to point to a database different from `DATABASE_URL` and refuse to run against any database not named `cammon_test`.
-
-## Production build
-
-After building, Express serves the React application, including frontend routes:
-
-```bash
-npm run build
-npm start
-```
-
-Open `http://localhost:3000`. Stop the development processes first so the API port is available.
-
-## Container build
-
-Build the production image:
-
-```bash
-docker build -t cammon:local .
-```
-
-## Project structure
+## Project Structure
 
 - `apps/web`: React application, role pages, camera publisher/viewer, and API clients
 - `apps/api`: Express API, authorization, domain services, workers, and tests
@@ -240,31 +379,14 @@ docker build -t cammon:local .
 - `compose.yaml`: local PostgreSQL with persistent storage
 - `Dockerfile`: multi-stage production application image
 
-## Environment variables
-
-See `.env.example` for the complete list.
-
-- `DATABASE_URL`: development/production PostgreSQL connection
-- `TEST_DATABASE_URL`: isolated integration-test database
-- `JWT_SECRET`: authentication signing secret of at least 32 characters
-- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`: video service credentials
-- `AUTH_SESSION_DURATION_SECONDS`: login-session lifetime
-- `CAMERA_HEARTBEAT_INTERVAL_SECONDS`: publisher heartbeat frequency
-- `CAMERA_PUBLISHING_LEASE_SECONDS`: time before a silent publisher is considered inactive
-- `CAMERA_CLEANUP_INTERVAL_SECONDS`: stale LiveKit room cleanup interval
-- `SSE_KEEPALIVE_INTERVAL_SECONDS`: SSE session-validation and keepalive interval
-- `APP_ORIGIN`: exact public HTTPS origin for mutation-origin validation behind a proxy
-- `DEMO_*`: demo account names, emails, and passwords used by the seed command
-
-The publishing lease must be at least three times the heartbeat interval.
-
-
 ## Implementation Plan
 
-See [docs/plan.md](docs/plan.md) for the requirement-by-requirement audit.
+See [docs/plan.md](docs/plan.md) for the implementation plan.
 
-## Local verification limits
+`docs/plan.md` reflects the implementation plan and design decisions made during development. The final implementation may differ slightly from the original plan.
+
+## Local Verification Limits
 
 The SSE emitter and authentication attempt limiter are per-process; use one API instance until shared messaging/rate limiting is configured. Login and reauthentication are limited to 60 requests per IP per 15 minutes.
 
-An optional browser smoke script, scripts/camera-smoke.cjs, exercises automatic preview, explicit publication, lock/unlock, Stop publishing, and camera layout widths of 375/768/1440 pixels. It requires Playwright and Chrome (or Playwright Chromium), a Vite server on port 5174, and mocks API/LiveKit traffic. Set PLAYWRIGHT_MODULE, CHROME_PATH and SMOKE_URL if needed. This does not verify real LiveKit transport or every screen's visual layout.
+An optional browser smoke script, `scripts/camera-smoke.cjs`, exercises automatic preview, explicit publication, lock/unlock, Stop publishing, and camera layout widths of 375/768/1440 pixels. It requires Playwright and Chrome (or Playwright Chromium), a Vite server on port 5174, and mocks API/LiveKit traffic. Set `PLAYWRIGHT_MODULE`, `CHROME_PATH` and `SMOKE_URL` if needed. This does not verify real LiveKit transport or every screen's visual layout.
