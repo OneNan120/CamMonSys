@@ -48,7 +48,7 @@ npm ci
 cp .env.example .env
 ```
 
-Skip the copy if `.env` already contains local configuration. Replace every placeholder in `.env`
+Skip the copy if `.env` already contains local configuration. Replace every placeholder in `.env`.
 
 Start PostgreSQL:
 
@@ -192,6 +192,8 @@ Publication readiness uses publishing_started_at so a new reservation cannot reu
 - `/api/stream`: authenticated SSE invalidation stream
 - `/api/health`: application and database health
 
+The complete machine-readable contract, including authentication, role constraints, request schemas, response schemas, and error cases, is in [docs/openapi.yaml](docs/openapi.yaml).
+
 ## Validation and verification
 
 Run the complete verification sequence:
@@ -253,6 +255,13 @@ See `.env.example` for the complete list.
 - `DEMO_*`: demo account names, emails, and passwords used by the seed command
 
 The publishing lease must be at least three times the heartbeat interval.
+
+
+## Assessment status
+
+The functional assessment requirements are implemented: role-based authentication and refresh persistence, device registration, automatic camera-page startup, Online/Offline and Last Seen tracking, live device/event refreshes, persisted simulated alerts, camera detail viewing, and the OPEN → ACKNOWLEDGED → RESOLVED workflow. Bonus work includes the Responder role, LiveKit video, groups/search/filtering, audit history, and API tests.
+
+Responsive visual acceptance against the supplied Figma design and public deployment are the remaining submission phases. See [docs/plan.md](docs/plan.md) for the requirement-by-requirement audit and acceptance checklist.
 
 ## Current deployment status
 

@@ -1,0 +1,914 @@
+openapi: 3.1.0
+info:
+  title: CamMonSys API
+  version: 1.0.0
+  description: Role-based camera monitoring REST and Server-Sent Events API.
+servers:
+  - url: /
+    description: Same-origin application server
+security:
+  - cookieAuth: []
+tags:
+  - { name: Health }
+  - { name: Authentication }
+  - { name: Devices }
+  - { name: Device groups }
+  - { name: Events }
+  - { name: Responders }
+  - { name: Audit }
+  - { name: Live updates }
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Check application and database health
+      security: []
+      responses:
+        '200':
+          description: Application and database are available.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '503':
+          description: Database is unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnavailableHealth' }
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Sign in
+      description: Unauthenticated. Limited to 60 attempts per IP per 15 minutes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Signed in and the HttpOnly session cookie was set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserEnvelope' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/InvalidCredentials' }
+        '403': { $ref: '#/components/responses/InvalidOrigin' }
+        '429': { $ref: '#/components/responses/TooManyAttempts' }
+  /api/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get the authenticated user
+      responses:
+        '200':
+          description: Current user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserEnvelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/auth/reauthenticate:
+    post:
+      tags: [Authentication]
+      summary: Verify the current Admin password
+      description: Admin only. Used to unlock client-side controls.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: { type: string, minLength: 1, maxLength: 1024 }
+      responses:
+        '204': { description: Password verified. }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/InvalidCredentials' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyAttempts' }
+  /api/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Sign out
+      description: Revokes the session, clears owned camera publications, and queues room cleanup.
+      responses:
+        '204': { description: Signed out and cookie cleared. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/InvalidOrigin' }
+  /api/devices:
+    get:
+      tags: [Devices]
+      summary: List active devices
+      description: Admin or Monitor only.
+      responses:
+        '200':
+          description: Devices ordered newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    items: { $ref: '#/components/schemas/DeviceSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Devices]
+      summary: Register a device
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDeviceRequest' }
+      responses:
+        '201':
+          description: Device registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device]
+                properties:
+                  device: { $ref: '#/components/schemas/CreatedDevice' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Selected device group does not exist.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/devices/{deviceId}:
+    parameters:
+      - { $ref: '#/components/parameters/DeviceId' }
+    get:
+      tags: [Devices]
+      summary: Get a device
+      description: Admin/Monitor, or a Responder with an unresolved assignment for this device.
+      responses:
+        '200':
+          description: Device details.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device]
+                properties:
+                  device: { $ref: '#/components/schemas/DeviceSummary' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Devices]
+      summary: Soft-delete a device
+      description: Admin only. Rejected while unresolved events exist.
+      responses:
+        '204': { description: Device soft-deleted. }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Device has unresolved events.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/devices/{deviceId}/group:
+    parameters:
+      - { $ref: '#/components/parameters/DeviceId' }
+    patch:
+      tags: [Devices, Device groups]
+      summary: Assign or remove a device group
+      description: Admin only. A null groupId makes the device ungrouped.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [groupId]
+              properties:
+                groupId:
+                  oneOf:
+                    - { type: string, format: uuid }
+                    - { type: 'null' }
+      responses:
+        '200':
+          description: Assignment updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device]
+                properties:
+                  device: { $ref: '#/components/schemas/DeviceGroupAssignment' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Device or group does not exist.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/devices/{deviceId}/start:
+    parameters:
+      - { $ref: '#/components/parameters/DeviceId' }
+    post:
+      tags: [Devices]
+      summary: Reserve a camera publication
+      description: Admin only. Returns a publish-only LiveKit connection.
+      responses:
+        '200':
+          description: Publication reserved.
+          headers:
+            Cache-Control: { schema: { type: string }, description: Always no-store. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CameraStart' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Device is unavailable or already reserved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/devices/{deviceId}/heartbeat:
+    parameters:
+      - { $ref: '#/components/parameters/DeviceId' }
+    post:
+      tags: [Devices]
+      summary: Renew a camera publication lease
+      description: Admin only. The current authenticated session must own the publication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishingSessionRequest' }
+      responses:
+        '200':
+          description: Lease and Last Seen updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lastSeenAt, leaseExpiresAt]
+                properties:
+                  lastSeenAt: { type: string, format: date-time }
+                  leaseExpiresAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Publication is no longer active.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/devices/{deviceId}/stop:
+    parameters:
+      - { $ref: '#/components/parameters/DeviceId' }
+    post:
+      tags: [Devices]
+      summary: Stop a camera publication
+      description: Admin only. Releases the lease and queues room cleanup.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishingSessionRequest' }
+      responses:
+        '202':
+          description: Publication released.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { type: string }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Publication is no longer current.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/devices/{deviceId}/view-token:
+    parameters:
+      - { $ref: '#/components/parameters/DeviceId' }
+    post:
+      tags: [Devices]
+      summary: Create a camera viewer connection
+      description: Admin/Monitor, or a Responder with an unresolved device assignment. Returns a subscribe-only LiveKit connection.
+      responses:
+        '200':
+          description: Viewer connection.
+          headers:
+            Cache-Control: { schema: { type: string }, description: Always no-store. }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CameraConnection' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Camera is offline or access/publication changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/devices/{deviceId}/events:
+    parameters:
+      - { $ref: '#/components/parameters/DeviceId' }
+    post:
+      tags: [Events]
+      summary: Create a simulated camera event
+      description: Admin only. Requires ownership of the active publication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [publishingSessionId, type]
+              properties:
+                publishingSessionId: { type: string, format: uuid }
+                type: { $ref: '#/components/schemas/EventType' }
+      responses:
+        '201':
+          description: Event persisted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event]
+                properties:
+                  event: { $ref: '#/components/schemas/CreatedEvent' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Publication is inactive.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/device-groups:
+    get:
+      tags: [Device groups]
+      summary: List groups
+      description: Admin or Monitor only.
+      responses:
+        '200':
+          description: Groups ordered by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [groups]
+                properties:
+                  groups:
+                    type: array
+                    items: { $ref: '#/components/schemas/DeviceGroup' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Device groups]
+      summary: Create a group
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+      responses:
+        '201':
+          description: Group created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [group]
+                properties:
+                  group: { $ref: '#/components/schemas/DeviceGroup' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Group name conflict.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/device-groups/{groupId}:
+    parameters:
+      - { $ref: '#/components/parameters/GroupId' }
+    delete:
+      tags: [Device groups]
+      summary: Delete a group
+      description: Admin only. Devices are preserved and become ungrouped.
+      responses:
+        '204': { description: Group deleted. }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/events:
+    get:
+      tags: [Events]
+      summary: List monitoring events
+      description: Admin/Monitor can optionally filter by device. Responders must use assignedTo=me and receive unresolved assignments only.
+      parameters:
+        - name: deviceId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: assignedTo
+          in: query
+          schema: { type: string, const: me }
+      responses:
+        '200':
+          description: Authorized events, up to 100.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: '#/components/schemas/MonitoringEvent' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/events/{eventId}/status:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    patch:
+      tags: [Events]
+      summary: Advance an event status
+      description: Admin, Monitor, or assigned Responder. Allows only OPEN to ACKNOWLEDGED to RESOLVED.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [status]
+                  properties:
+                    status: { type: string, const: ACKNOWLEDGED }
+                - type: object
+                  additionalProperties: false
+                  required: [status]
+                  properties:
+                    status: { type: string, const: RESOLVED }
+                    completionNote: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        '200':
+          description: Status updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event]
+                properties:
+                  event: { $ref: '#/components/schemas/UpdatedEvent' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Invalid current status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/events/{eventId}/assignment:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    patch:
+      tags: [Events]
+      summary: Assign, reassign, or unassign a Responder
+      description: Admin or Monitor only. Resolved events cannot be changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [responderId, instructions]
+                  properties:
+                    responderId: { type: string, format: uuid }
+                    instructions: { type: string, minLength: 1, maxLength: 1000 }
+                - type: object
+                  additionalProperties: false
+                  required: [responderId]
+                  properties:
+                    responderId: { type: 'null' }
+                    instructions: { type: 'null' }
+      responses:
+        '200':
+          description: Assignment updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event]
+                properties:
+                  event: { $ref: '#/components/schemas/EventAssignment' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: Event or Responder does not exist.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+        '409':
+          description: Event is resolved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /api/responders:
+    get:
+      tags: [Responders]
+      summary: List Responders
+      description: Admin or Monitor only.
+      responses:
+        '200':
+          description: Responders ordered by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [responders]
+                properties:
+                  responders:
+                    type: array
+                    items: { $ref: '#/components/schemas/Responder' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/audit-logs:
+    get:
+      tags: [Audit]
+      summary: Search and filter audit records
+      description: Admin only. Supplied filters use AND semantics.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+        - name: search
+          in: query
+          description: Case-insensitive actor, action, target type, or target ID search.
+          schema: { type: string, maxLength: 100 }
+        - { name: actorId, in: query, schema: { type: string, format: uuid } }
+        - { name: action, in: query, schema: { type: string, minLength: 1, maxLength: 100 } }
+        - { name: targetType, in: query, schema: { type: string, minLength: 1, maxLength: 100 } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: sort, in: query, schema: { type: string, enum: [newest, oldest], default: newest } }
+      responses:
+        '200':
+          description: Matching audit records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [auditLogs]
+                properties:
+                  auditLogs:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditLog' }
+        '400': { $ref: '#/components/responses/InvalidInput' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/audit-logs/filter-options:
+    get:
+      tags: [Audit]
+      summary: Get available audit filter values
+      description: Admin only.
+      responses:
+        '200':
+          description: Filter choices from existing records.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditFilterOptions' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/stream:
+    get:
+      tags: [Live updates]
+      summary: Subscribe to authenticated invalidation events
+      description: Admin, Monitor, or Responder. Emits devices-changed, events-changed, and access-ended SSE messages with empty JSON data.
+      responses:
+        '200':
+          description: Server-Sent Events stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+              example: "event: devices-changed\ndata: {}\n\n"
+        '401': { $ref: '#/components/responses/Unauthorized' }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: cammon_token
+      description: HttpOnly signed JWT backed by a revocable PostgreSQL session.
+  parameters:
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    InvalidInput:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Unauthorized:
+      description: Authentication is missing, invalid, expired, or revoked.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    InvalidCredentials:
+      description: Credentials are invalid.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: The user lacks permission.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    InvalidOrigin:
+      description: Mutation origin is not allowed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    TooManyAttempts:
+      description: Authentication attempt limit exceeded.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds until another attempt may be accepted.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Resource was not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  schemas:
+    UserRole:
+      type: string
+      enum: [ADMIN, MONITOR, RESPONDER]
+    EventType:
+      type: string
+      enum: [TEST_ALERT, MOTION, BED_EXIT]
+    EventStatus:
+      type: string
+      enum: [OPEN, ACKNOWLEDGED, RESOLVED]
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, name, email, role]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/UserRole' }
+    UserEnvelope:
+      type: object
+      additionalProperties: false
+      required: [user]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1 }
+    CreatedDevice:
+      type: object
+      additionalProperties: false
+      required: [id, name, location, created_by_id, group_id, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        location: { type: string }
+        created_by_id: { type: string, format: uuid }
+        group_id: { $ref: '#/components/schemas/NullableUuid' }
+        created_at: { type: string, format: date-time }
+    DeviceSummary:
+      type: object
+      additionalProperties: false
+      required: [id, name, location, group_id, last_seen_at, stream_version, created_at, status]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        location: { type: string }
+        group_id: { $ref: '#/components/schemas/NullableUuid' }
+        last_seen_at: { $ref: '#/components/schemas/NullableDateTime' }
+        stream_version:
+          description: Current publishing session used to reconnect viewers when rooms change.
+          $ref: '#/components/schemas/NullableUuid'
+        created_at: { type: string, format: date-time }
+        status: { type: string, enum: [ONLINE, OFFLINE] }
+    CreateDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [name, location]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        location: { type: string, minLength: 1, maxLength: 200 }
+        groupId: { $ref: '#/components/schemas/NullableUuid' }
+    DeviceGroupAssignment:
+      type: object
+      additionalProperties: false
+      required: [id, group_id]
+      properties:
+        id: { type: string, format: uuid }
+        group_id: { $ref: '#/components/schemas/NullableUuid' }
+    DeviceGroup:
+      type: object
+      additionalProperties: false
+      required: [id, name, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+    PublishingSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [publishingSessionId]
+      properties:
+        publishingSessionId: { type: string, format: uuid }
+    CameraConnection:
+      type: object
+      additionalProperties: false
+      required: [serverUrl, token]
+      properties:
+        serverUrl: { type: string, format: uri, pattern: '^wss://' }
+        token: { type: string, description: Short-lived LiveKit JWT. }
+    CameraStart:
+      allOf:
+        - { $ref: '#/components/schemas/CameraConnection' }
+        - type: object
+          required: [publishingSessionId, heartbeatIntervalSeconds]
+          properties:
+            publishingSessionId: { type: string, format: uuid }
+            heartbeatIntervalSeconds: { type: integer, minimum: 1 }
+    CreatedEvent:
+      type: object
+      additionalProperties: false
+      required: [id, device_id, type, status, created_at, assigned_to_id]
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/EventType' }
+        status: { $ref: '#/components/schemas/EventStatus' }
+        created_at: { type: string, format: date-time }
+        assigned_to_id: { $ref: '#/components/schemas/NullableUuid' }
+    MonitoringEvent:
+      type: object
+      additionalProperties: false
+      required: [id, device_id, device_name, device_location, type, status, created_at, assigned_to_id, assigned_to_name, assigned_by_name, instructions, completion_note, acknowledged_at, acknowledged_by_name, resolved_at, resolved_by_name]
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        device_name: { type: string }
+        device_location: { type: string }
+        type: { $ref: '#/components/schemas/EventType' }
+        status: { $ref: '#/components/schemas/EventStatus' }
+        created_at: { type: string, format: date-time }
+        assigned_to_id: { $ref: '#/components/schemas/NullableUuid' }
+        assigned_to_name: { $ref: '#/components/schemas/NullableString' }
+        assigned_by_name: { $ref: '#/components/schemas/NullableString' }
+        instructions: { $ref: '#/components/schemas/NullableString' }
+        completion_note: { $ref: '#/components/schemas/NullableString' }
+        acknowledged_at: { $ref: '#/components/schemas/NullableDateTime' }
+        acknowledged_by_name: { $ref: '#/components/schemas/NullableString' }
+        resolved_at: { $ref: '#/components/schemas/NullableDateTime' }
+        resolved_by_name: { $ref: '#/components/schemas/NullableString' }
+    UpdatedEvent:
+      type: object
+      additionalProperties: true
+      required: [id, device_id, type, status, created_at, assigned_to_id]
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/EventType' }
+        status: { $ref: '#/components/schemas/EventStatus' }
+        created_at: { type: string, format: date-time }
+        assigned_to_id: { $ref: '#/components/schemas/NullableUuid' }
+        completion_note: { $ref: '#/components/schemas/NullableString' }
+    EventAssignment:
+      type: object
+      additionalProperties: false
+      required: [id, device_id, status, assigned_to_id, assigned_by_id, instructions]
+      properties:
+        id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/EventStatus' }
+        assigned_to_id: { $ref: '#/components/schemas/NullableUuid' }
+        assigned_by_id: { $ref: '#/components/schemas/NullableUuid' }
+        instructions: { $ref: '#/components/schemas/NullableString' }
+    Responder:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    AuditLog:
+      type: object
+      additionalProperties: false
+      required: [id, action, target_type, target_id, created_at, actor_id, actor_name]
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string }
+        target_type: { type: string }
+        target_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        actor_id: { type: string, format: uuid }
+        actor_name: { type: string }
+    AuditFilterOptions:
+      type: object
+      additionalProperties: false
+      required: [actors, actions, targetTypes]
+      properties:
+        actors:
+          type: array
+          items: { $ref: '#/components/schemas/Responder' }
+        actions:
+          type: array
+          items: { type: string }
+        targetTypes:
+          type: array
+          items: { type: string }
+    NullableUuid:
+      oneOf:
+        - { type: string, format: uuid }
+        - { type: 'null' }
+    NullableString:
+      oneOf:
+        - { type: string }
+        - { type: 'null' }
+    NullableDateTime:
+      oneOf:
+        - { type: string, format: date-time }
+        - { type: 'null' }
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status, database]
+      properties:
+        status: { type: string, const: ok }
+        database: { type: string, const: connected }
+    UnavailableHealth:
+      type: object
+      additionalProperties: false
+      required: [status, database]
+      properties:
+        status: { type: string, const: unavailable }
+        database: { type: string, const: disconnected }

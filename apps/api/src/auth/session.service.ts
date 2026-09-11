@@ -24,24 +24,59 @@ export async function createLoginSession(userId: string) {
 }
 
 export async function revokeLoginSession(sessionId: string) {
-  await pool.query(
-    `WITH revoked AS (
-       UPDATE auth_sessions SET revoked_at = NOW()
-       WHERE id = $1 AND revoked_at IS NULL RETURNING id
-     ), stopped AS (
-       UPDATE devices
-       SET publishing_session_id = NULL,
-           publishing_owner_session_id = NULL,
-           publishing_lease_expires_at = NULL
-       WHERE publishing_owner_session_id IN (SELECT id FROM revoked)
-       RETURNING id
-     )
-     INSERT INTO camera_room_cleanup (device_id, publishing_session_id)
-     SELECT d.id, d.publishing_session_id FROM devices d
-     JOIN stopped s ON s.id = d.id
-     WHERE d.publishing_session_id IS NOT NULL
-     ON CONFLICT (device_id, publishing_session_id) DO NOTHING`,
-    [sessionId],
-  );
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const revoked = await client.query(
+      `UPDATE auth_sessions
+       SET revoked_at = NOW()
+       WHERE id = $1
+         AND revoked_at IS NULL
+       RETURNING id`,
+      [sessionId],
+    );
+
+    if (revoked.rowCount === 1) {
+      const publications = await client.query<{
+        id: string;
+        publishing_session_id: string;
+      }>(
+        `SELECT id, publishing_session_id
+         FROM devices
+         WHERE publishing_owner_session_id = $1
+           AND publishing_session_id IS NOT NULL
+         FOR UPDATE`,
+        [sessionId],
+      );
+
+      for (const publication of publications.rows) {
+        await client.query(
+          `INSERT INTO camera_room_cleanup (device_id, publishing_session_id)
+           VALUES ($1, $2)
+           ON CONFLICT (device_id, publishing_session_id) DO NOTHING`,
+          [publication.id, publication.publishing_session_id],
+        );
+      }
+
+      await client.query(
+        `UPDATE devices
+         SET publishing_session_id = NULL,
+             publishing_owner_session_id = NULL,
+             publishing_lease_expires_at = NULL
+         WHERE publishing_owner_session_id = $1`,
+        [sessionId],
+      );
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
   notifyDevicesChanged();
 }
