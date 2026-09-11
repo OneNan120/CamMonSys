@@ -23,3 +23,10 @@ export function logout() {
     method: 'POST',
   });
 }
+
+export function reauthenticate(password: string) {
+  return apiRequest<void>('/api/auth/reauthenticate', {
+    method: 'POST',
+    body: JSON.stringify({ password }),
+  });
+}

@@ -39,3 +39,25 @@ export async function authenticateUser(
     role: user.role,
   };
 }
+
+export async function verifyUserPassword(
+  userId: string,
+  password: string,
+): Promise<boolean> {
+  const result = await pool.query<{
+    password_hash: string;
+  }>(
+    `SELECT password_hash
+     FROM users
+     WHERE id = $1`,
+    [userId],
+  );
+
+  const user = result.rows[0];
+
+  if (!user) {
+    return false;
+  }
+
+  return verifyPassword(user.password_hash, password);
+}

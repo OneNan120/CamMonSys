@@ -12,6 +12,9 @@ import { ManageDeviceGroupsPage } from './device-groups/ManageDeviceGroupsPage';
 import { ResponderAssignmentsPage } from './responders/ResponderAssignmentsPage';
 import { ResponderDevicePage } from './responders/ResponderDevicePage';
 import { AuditLogPage } from './audit/AuditLogPage';
+import { AdminLockScreen } from './auth/AdminLockScreen';
+
+const ADMIN_LOCK_STORAGE_KEY = 'cammon_admin_locked';
 
 export function App() {
 
@@ -22,6 +25,7 @@ export function App() {
     const [error, setError] = useState('');
     const [signingOut, setSigningOut] = useState(false);
     const [attempt, setAttempt] = useState(0);
+    const [adminLocked, setAdminLocked] = useState(() => sessionStorage.getItem(ADMIN_LOCK_STORAGE_KEY) ==='true',);
 
   useEffect(() => {
     let active = true;
@@ -51,16 +55,43 @@ export function App() {
     };
   }, [attempt]);
 
+  useEffect(() => {
+    if (loading || !user) return;
+
+    if (user.role !== 'ADMIN') {
+      sessionStorage.removeItem(ADMIN_LOCK_STORAGE_KEY);
+      setAdminLocked(false);
+    }
+  }, [loading, user]);
+
+  function handleLock() {
+    sessionStorage.setItem(
+      ADMIN_LOCK_STORAGE_KEY,
+      'true',
+    );
+
+    setAdminLocked(true);
+  }
+
+  function handleUnlock() {
+    sessionStorage.removeItem(ADMIN_LOCK_STORAGE_KEY);
+    setAdminLocked(false);
+  }
+
   async function handleLogout() {
     setSigningOut(true);
     setError('');
 
     try {
       await logout();
+      sessionStorage.removeItem(ADMIN_LOCK_STORAGE_KEY);
+      setAdminLocked(false);
       setUser(null);
       navigate('/', { replace: true});
     } catch (error: unknown) {
       if (error instanceof ApiError && error.status === 401) {
+        sessionStorage.removeItem(ADMIN_LOCK_STORAGE_KEY);
+        setAdminLocked(false);
         setUser(null);
         navigate('/', { replace: true});
       } else {
@@ -90,6 +121,17 @@ export function App() {
     return <LoginPage onLogin={setUser} />;
   }
 
+  if (user.role === 'ADMIN' && adminLocked) {
+    return (
+      <AdminLockScreen
+        adminName={user.name}
+        signingOut={signingOut}
+        onUnlock={handleUnlock}
+        onSignOut={() => void handleLogout()}
+      />
+    );
+  }
+
   return (
     <main>
         <header>
@@ -108,6 +150,12 @@ export function App() {
               </>
             )}
         </nav>
+
+        {user.role === 'ADMIN' && (
+          <button type="button" onClick={handleLock}>
+            Lock controls
+          </button>
+        )}
 
         <button onClick={handleLogout} disabled={signingOut}>
             {signingOut ? 'Signing out…' : 'Sign out'}
